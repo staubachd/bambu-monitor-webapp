@@ -1,0 +1,14 @@
+# Normalize line endings: store text as LF in the repo, let Git handle the
+# working-copy conversion per platform. Silences the "LF will be replaced by
+# CRLF" warnings and keeps diffs clean across Windows/Linux.
+* text=auto
+
+# Files that MUST stay LF even on Windows checkouts - they run on the Synology
+# (Linux); CRLF would break the shebang / shell parsing.
+*.sh   text eol=lf
+
+# Binary / data files Git should never touch line endings on.
+*.db     binary
+*.sqlite binary
+*.png    binary
+*.jpg    binary

@@ -10,6 +10,10 @@ telemetry.db
 # Captured telemetry samples (may contain identifiers)
 sample_report.json
 
+# go2rtc relay: binary is downloaded per-arch, config is generated from printer.config.json
+go2rtc/go2rtc_*
+go2rtc.yaml
+
 # Python
 __pycache__/
 *.pyc

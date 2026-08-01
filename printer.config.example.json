@@ -48,5 +48,13 @@
     "password": "YOUR_BAMBU_CLOUD_PASSWORD",
     "token": "",
     "poll_min": 10
+  },
+  "camera": {
+    "enabled": false,
+    "src": "bambu",
+    "rtsp_port": 322,
+    "api_port": 1984,
+    "webrtc_port": 8555,
+    "bin": "go2rtc/go2rtc_linux_arm64"
   }
 }
