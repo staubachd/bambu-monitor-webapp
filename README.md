@@ -99,7 +99,9 @@ per print must be accurate)
 ## Screenshotted at a glance
 
 ```
-<img width="1846" height="821" alt="grafik" src="https://github.com/user-attachments/assets/6eb83437-c5cf-4ba0-b44f-8231ec329b7c" />
+
+<img width="1846" height="821" alt="bambuapp" src="https://github.com/user-attachments/assets/dc211da9-0c90-4a82-83dd-ead3afad013e" />
+
 
 ```
 
