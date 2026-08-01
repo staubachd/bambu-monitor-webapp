@@ -98,12 +98,7 @@ per print must be accurate)
 
 ## Screenshotted at a glance
 
-```
-
 <img width="1846" height="821" alt="bambuapp" src="https://github.com/user-attachments/assets/dc211da9-0c90-4a82-83dd-ead3afad013e" />
-
-
-```
 
 ---
 
