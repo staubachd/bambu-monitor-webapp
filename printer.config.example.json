@@ -1,0 +1,52 @@
+{
+  "ip": "192.168.1.100",
+  "access_code": "00000000",
+  "serial": "YOUR_PRINTER_SERIAL",
+  "model": "X2D",
+
+  "power": {
+    "enabled": false,
+    "model": "p110",
+    "host": "192.168.1.101",
+    "email": "your-tapo-account@example.com",
+    "password": "YOUR_TAPO_PASSWORD",
+    "poll_sec": 20
+  },
+
+  "cost": {
+    "currency": "€",
+    "price_per_kwh": 0.30
+  },
+
+  "filament": {
+    "bambu": { "PLA": 24.99, "PETG": 27.99, "default": 24.99 },
+    "other": { "PLA": 14.50, "PETG": 16.90, "default": 14.50 },
+    "default_per_kg": 20.0,
+    "per_slot": {},
+    "per_filament_id": {},
+    "per_type": {}
+  },
+
+  "storage": {
+    "backend": "sqlite",
+    "sqlite_path": "telemetry.db",
+    "sample_interval_sec": 20,
+    "retention_days": 30,
+    "auto_tail_min": 10,
+    "mariadb": {
+      "host": "127.0.0.1",
+      "port": 3306,
+      "user": "bambu",
+      "password": "REPLACE_WITH_STRONG_PASSWORD",
+      "database": "bambu_monitor"
+    }
+  },
+
+  "cloud": {
+    "enabled": false,
+    "email": "your-bambu-account@example.com",
+    "password": "YOUR_BAMBU_CLOUD_PASSWORD",
+    "token": "",
+    "poll_min": 10
+  }
+}

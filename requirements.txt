@@ -1,0 +1,5 @@
+paho-mqtt>=2.0
+flask>=3.0
+PyMySQL>=1.1
+# smart-plug power monitoring (Tapo P110/P110M) - prebuilt aarch64 cp39 wheel exists
+tapo>=0.8.7

@@ -1,0 +1,20 @@
+# Local printer credentials - never commit (copy printer.config.example.json)
+printer.config.json
+
+# Local telemetry database (holds job names / printer serial, no need to publish)
+telemetry.db
+*.db
+*.sqlite
+*.sqlite3
+
+# Captured telemetry samples (may contain identifiers)
+sample_report.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+app*.log
+app*.err
+sample_*.json
