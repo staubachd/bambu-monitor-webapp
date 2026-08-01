@@ -29,6 +29,7 @@ runnable on Windows/macOS/Linux for development.
 - [Configuration](#configuration)
 - [Running locally](#running-locally)
 - [Deploying to the Synology NAS](#deploying-to-the-synology-nas)
+- [Live view (camera)](#live-view-camera)
 - [HTTP API](#http-api)
 - [Storage & database schema](#storage--database-schema)
 - [How the tricky bits work](#how-the-tricky-bits-work)
@@ -87,8 +88,13 @@ per print must be accurate)
   with keys **colour-coded green when the app already consumes them** and white
   when they're still untapped — a live map of what's available to build next
 
+**Live view** (optional)
+- The printer's built-in camera in a **Live view** tab — fully local, relayed
+  through a bundled **go2rtc** binary (no cloud, no Docker). Hidden unless a
+  camera is configured. See [Live view (camera)](#live-view-camera).
+
 **UI**
-- Tabbed layout: Overview / Machine / Print history
+- Tabbed layout: Overview / Machine / Print history (+ Live view when enabled)
 - Live updates via Server-Sent Events (no polling from the browser)
 - **German by default with a DE/EN switcher**
 - Light/dark theme toggle
@@ -155,6 +161,7 @@ whenever the server pushes a new state.
 | Web framework    | **Flask** (threaded), Server-Sent Events for live push               |
 | Printer link     | **paho-mqtt 2.x** over TLS (`ssl`), local MQTT — no cloud dependency for telemetry |
 | Smart plug       | **`tapo`** library (async; driven from a thread)                     |
+| Camera relay     | **go2rtc** (single static binary, no Docker) — RTSPS → WebRTC/MSE, launched & supervised by `app.py` |
 | Database         | **SQLite** (local dev) / **MariaDB** via **PyMySQL** (production on NAS) |
 | Frontend         | Single hand-written `dashboard.html` — vanilla JS, CSS Grid, inline-SVG charts. **No build step, no framework, no external assets** (matters behind a strict/offline NAS). |
 | i18n             | English strings are the keys; a `DE` dictionary provides German; missing entries degrade to English |
@@ -353,6 +360,77 @@ Full detail is in [`deploy/DEPLOY.md`](deploy/DEPLOY.md); the essentials:
 
 ---
 
+## Live view (camera)
+
+An optional **Live view** tab shows the printer's built-in camera, streamed
+**entirely locally** — no cloud, no Docker. It's hidden unless a camera is
+configured, so it never affects installs that don't use it.
+
+### How it works
+
+The X2D exposes its camera as an **RTSPS (RTSP-over-TLS) stream on port 322**
+(`rtsps://bblp:<access-code>@<ip>:322/streaming/live/1`, H.264). Browsers can't
+play RTSPS directly, so a tiny relay — **[go2rtc](https://github.com/AlexxIT/go2rtc)**,
+a single static binary — converts it to browser-native **WebRTC/MSE** (H.264
+passthrough, no transcoding, so it's light on the NAS CPU).
+
+`app.py` owns the relay end-to-end: it generates `go2rtc.yaml` from
+`printer.config.json` (so the access code never lives in a second file) and
+launches + supervises the go2rtc process. The dashboard's Live view tab embeds
+go2rtc's player, and only connects **while the tab is open** so the camera isn't
+streamed 24/7.
+
+```
+Printer ──RTSPS:322 (H.264)──► go2rtc ──WebRTC/MSE:1984──► Live view tab
+         (LAN Mode Live View on)   (relay, on the NAS)      (browser)
+```
+
+### Setup
+
+1. **On the printer:** enable **"LAN Mode Live View"** on the touchscreen (on the
+   X2D it's under the **LAN Only** section, but it does **not** require LAN-Only
+   mode — it works with Cloud mode on). This makes the printer advertise
+   `rtsp_url` and serve port 322.
+2. **Get the relay binary:** download the `go2rtc` build for your NAS architecture
+   into `go2rtc/` (ARM64 Synology → `go2rtc_linux_arm64`; Intel → `_linux_amd64`).
+   `app.py` `chmod +x`'s it on start.
+3. **Enable it in config** — the `camera` block in `printer.config.json`:
+   ```json
+   "camera": { "enabled": true, "src": "bambu", "rtsp_port": 322,
+               "api_port": 1984, "webrtc_port": 8555, "bin": "go2rtc/go2rtc_linux_arm64" }
+   ```
+4. **Restart** the app. The Live view tab appears automatically.
+
+The RTSP password is the printer's **LAN access code** (not the serial), reused
+from the top-level config. go2rtc uses **UDP transport** (`#transport=udp`) because
+the printer's LIVE555 camera only feeds RTP over UDP, not TCP-interleaved.
+
+### Ports & firewall
+
+go2rtc listens on **1984** (player/MSE, TCP) and **8555/UDP** (WebRTC). On a home
+LAN with the Synology firewall off, nothing extra is needed. If the firewall is on,
+allow those, and allow inbound from the printer's IP (the camera's UDP RTP uses
+ephemeral ports).
+
+### Verify from the NAS
+
+No browser or ffmpeg needed — pull a few seconds of H.264 straight from the relay:
+```sh
+curl -s --max-time 12 -o /tmp/cam.mp4 "http://localhost:1984/api/stream.mp4?src=bambu"; ls -l /tmp/cam.mp4
+```
+A file of a few hundred KB (or more) = video is flowing.
+
+### ⚠ One camera connection at a time
+
+The printer serves **only one** RTSPS/LAN camera client at once. If the Bambu Handy
+app, Bambu Studio, or a second tool is viewing the camera, the app's relay gets a
+negotiated-but-silent session (connects, authenticates, then no frames). Symptoms of
+a **stuck/contended slot**: the RTSP handshake succeeds (`PLAY → 200 OK`) but no
+video arrives. Fixes: close other viewers; if it stays wedged, power-cycle the
+printer (and re-enable LAN Mode Live View, which a reboot can revert).
+
+---
+
 ## HTTP API
 
 | Method & path              | Purpose                                                             |
@@ -363,6 +441,7 @@ Full detail is in [`deploy/DEPLOY.md`](deploy/DEPLOY.md); the essentials:
 | `GET /api/history`         | Telemetry time-series (`?hours=` window) for the charts.            |
 | `GET /api/prints`          | Recent print history (`?limit=`).                                   |
 | `GET /api/raw`             | `{ data, covered }` — the full last printer report plus the list of keys the app consumes (drives the green/white highlighting). |
+| `GET /api/camera`          | `{ enabled, api_port, src }` — whether the Live view tab shows and how to reach the go2rtc relay (no secrets). |
 | `POST /api/recording`      | Set recording mode `{ "mode": "auto"｜"on"｜"off" }` (persisted).    |
 | `POST /api/led`            | Chamber light `{ "mode": "on"｜"off" }` (needs a live connection).   |
 | `POST /api/prints/label`   | Rename a print (editable job name).                                 |
@@ -447,6 +526,8 @@ A few behaviours are non-obvious because the printer's raw data is messy:
 | `#1054 Unknown column …` (MariaDB)                  | Backend is on MariaDB but the schema is behind; the column-migration runs on startup — restart the app, or check the config didn't get flipped to sqlite. |
 | Garbled `°`/`€`/umlauts after editing on Windows    | A file was round-tripped through PowerShell; re-edit with a UTF-8-aware tool. |
 | Cloud login fails                                   | Re-run `tools/setup_cloud.py` to refresh the stored token.                  |
+| Live view spins / no picture                        | Printer serves **one** camera client at a time — close the Handy app / Bambu Studio / other tabs; if wedged, power-cycle the printer and re-enable LAN Mode Live View. Confirm with the `curl … stream.mp4` test. See [Live view](#live-view-camera). |
+| Live view tab missing                               | `camera.enabled` is false, or `/api/camera` reports disabled. Set it in `printer.config.json` and restart. |
 
 ---
 
