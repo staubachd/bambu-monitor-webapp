@@ -9,6 +9,7 @@ Writes the largest report it sees within 25s to:  sample_report.json
 (The 'pushall' response is the big one containing the complete state.)
 """
 import json
+import os
 import ssl
 import sys
 import time
@@ -20,7 +21,8 @@ if len(sys.argv) != 4:
 HOST, ACCESS_CODE, SERIAL = sys.argv[1], sys.argv[2], sys.argv[3]
 REPORT = f"device/{SERIAL}/report"
 REQUEST = f"device/{SERIAL}/request"
-OUT = "f:/Claude/bambu-monitor/sample_report.json"
+OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                   "samples", "sample_report.json")
 
 biggest = {"len": 0, "payload": None}
 

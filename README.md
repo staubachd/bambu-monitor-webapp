@@ -200,27 +200,28 @@ Design constraints that shaped these choices:
 
 | File                          | Purpose                                                                 |
 | ----------------------------- | ----------------------------------------------------------------------- |
-| `app.py`                      | The application: Flask server, MQTT/power/cloud/purge worker threads, all API endpoints, SSE. |
+| **Core runtime** (root)       | The running app — these stay in root; `app.py` imports the modules and serves the HTML. |
+| `app.py`                      | The application: Flask server, MQTT/power/cloud/purge/go2rtc worker threads, all API endpoints, SSE. |
 | `bambu_state.py`              | Pure parser: turns a raw Bambu MQTT report into a clean, stable state dict. No I/O. |
 | `storage.py`                  | Storage abstraction with two backends (sqlite / mariadb), schema, migrations, per-print upserts. |
 | `bambu_cloud.py`              | Bambu Cloud client (login, task list) for finished-print enrichment.    |
 | `dashboard.html`             | The entire frontend (HTML + CSS + JS + i18n) in one file.               |
-| `printer.config.json`         | **All configuration and secrets** (printer, plug, cost, filament, storage, cloud). Not committed. |
+| `printer.config.json`         | **All configuration and secrets** (printer, plug, cost, filament, storage, cloud, camera). Not committed. |
 | `requirements.txt`            | Python dependencies.                                                    |
-| **Setup helpers**             |                                                                         |
-| `setup_cloud.py`              | Interactive Bambu Cloud login → stores an auth token in the config.     |
-| `setup_power.py`              | Verifies Tapo plug connectivity and credentials.                        |
-| `test_mqtt_local.py`          | Standalone check that local MQTT works against the printer.             |
-| `capture_sample.py`           | Captures a real report to `sample_report.json` for offline parser testing. |
-| `explore_ftps.py`            | Explores the printer's FTPS file store (models/thumbnails).            |
-| `sample_report.json` / `sample_idle.json` | Captured payloads used by `bambu_state.py`'s self-test.     |
+| `go2rtc/`                     | The go2rtc relay binary for the camera Live view (downloaded per-arch; not committed). |
+| **`tools/`**                  | Dev & one-time setup helpers — not part of the running app.             |
+| `tools/setup_cloud.py`        | Interactive Bambu Cloud login → stores an auth token in the config.     |
+| `tools/setup_power.py`        | Verifies Tapo plug connectivity and credentials.                        |
+| `tools/test_mqtt_local.py`    | Standalone check that local MQTT works against the printer.             |
+| `tools/capture_sample.py`     | Captures a real report to `samples/sample_report.json` for offline parser testing. |
+| `tools/explore_ftps.py`       | Explores the printer's FTPS file store (models/thumbnails).            |
+| `samples/`                    | Captured payloads used by `bambu_state.py`'s self-test (not committed).  |
 | **`deploy/`**                 |                                                                         |
 | `deploy/start.sh`             | Idempotent POSIX launcher (pidfile + `kill -0`), supports a `restart` arg. |
 | `deploy/DEPLOY.md`            | Step-by-step NAS deployment notes.                                      |
 | `deploy/schema_and_user.sql`  | Creates the MariaDB database, tables and app user.                     |
 | `deploy/sqlite_to_mariadb.py` | One-shot migration of a local sqlite DB into MariaDB.                  |
 | `deploy/recalc_print_energy.py` | Backfills/recomputes per-print energy after pricing changes.         |
-| `deploy/*.sql`                | Ad-hoc fix/diagnostic scripts (e.g. packed-temperature repair).        |
 
 ---
 
@@ -314,10 +315,10 @@ python app.py
 
 Handy checks before/while developing:
 ```bash
-python test_mqtt_local.py        # confirm local MQTT works
-python setup_power.py            # confirm the Tapo plug answers
-python setup_cloud.py            # log into Bambu Cloud, store token
-python bambu_state.py sample_report.json   # run the parser self-test offline
+python tools/test_mqtt_local.py <ip> <access-code> <serial>   # confirm local MQTT works
+python tools/setup_power.py       # confirm the Tapo plug answers
+python tools/setup_cloud.py       # log into Bambu Cloud, store token
+python bambu_state.py             # run the parser self-test against samples/
 ```
 
 The parser (`bambu_state.py`) is pure and has a self-test with assertions, so you
@@ -445,7 +446,7 @@ A few behaviours are non-obvious because the printer's raw data is messy:
 | MQTT keeps connecting/disconnecting                 | Two app instances fighting over the printer's single `bblp` login — ensure the watchdog didn't spawn a duplicate (`start.sh` guards against this). |
 | `#1054 Unknown column …` (MariaDB)                  | Backend is on MariaDB but the schema is behind; the column-migration runs on startup — restart the app, or check the config didn't get flipped to sqlite. |
 | Garbled `°`/`€`/umlauts after editing on Windows    | A file was round-tripped through PowerShell; re-edit with a UTF-8-aware tool. |
-| Cloud login fails                                   | Re-run `setup_cloud.py` to refresh the stored token.                        |
+| Cloud login fails                                   | Re-run `tools/setup_cloud.py` to refresh the stored token.                  |
 
 ---
 

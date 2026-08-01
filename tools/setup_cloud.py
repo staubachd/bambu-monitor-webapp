@@ -14,7 +14,7 @@ import json
 import os
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root (tools/ is one level down)
 sys.path.insert(0, HERE)
 from bambu_cloud import BambuCloud, CloudError  # noqa: E402
 

@@ -18,7 +18,7 @@ import json
 import os
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root (tools/ is one level down)
 CFG_PATH = os.path.join(HERE, "printer.config.json")
 
 try:

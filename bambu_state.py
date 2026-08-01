@@ -331,7 +331,7 @@ if __name__ == "__main__":
     import json
     import sys
 
-    path = sys.argv[1] if len(sys.argv) > 1 else "sample_report.json"
+    path = sys.argv[1] if len(sys.argv) > 1 else "samples/sample_report.json"
     with open(path, encoding="utf-8") as fh:
         raw = json.load(fh)
 

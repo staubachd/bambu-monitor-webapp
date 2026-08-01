@@ -15,7 +15,7 @@ import os
 import ssl
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root (tools/ is one level down)
 cfg = json.load(open(os.path.join(HERE, "printer.config.json"), encoding="utf-8"))
 HOST, CODE = cfg["ip"], cfg["access_code"]
 
