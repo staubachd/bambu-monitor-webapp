@@ -99,14 +99,8 @@ per print must be accurate)
 ## Screenshotted at a glance
 
 ```
-┌───────────────────────────────────────────────────────────────────────┐
-│ ● Live · SN … · fw …     [Wi-Fi] [Auto|On|Off] [⚠ Health] [DE|EN] 💡 ◐ │
-├───────────────────────────────────────────────────────────────────────┤
-│  Overview │ Machine │ Print history                                     │
-├───────────────────────────────────────────────────────────────────────┤
-│  ┌ Hero ring ┐  ┌ AMS slots ┐  ┌ Temps (N1/N2/Bed/Chamber) ┐          │
-│  ┌ Temp chart ┐ ┌ Cost tile ┐  ┌ Power draw ┐                          │
-└───────────────────────────────────────────────────────────────────────┘
+<img width="1846" height="821" alt="grafik" src="https://github.com/user-attachments/assets/6eb83437-c5cf-4ba0-b44f-8231ec329b7c" />
+
 ```
 
 ---
