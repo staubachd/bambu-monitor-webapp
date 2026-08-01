@@ -100,6 +100,12 @@ per print must be accurate)
 
 <img width="1846" height="821" alt="bambuapp" src="https://github.com/user-attachments/assets/dc211da9-0c90-4a82-83dd-ead3afad013e" />
 
+<img width="1829" height="758" alt="bambuapp2" src="https://github.com/user-attachments/assets/61fc2555-5dfe-482c-b412-285961eff1e3" />
+
+<img width="1842" height="516" alt="bambuapp3" src="https://github.com/user-attachments/assets/2acc2708-de20-4674-9870-4ab5cee69df0" />
+
+
+
 ---
 
 ## Architecture
