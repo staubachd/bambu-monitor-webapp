@@ -60,19 +60,24 @@
      One 12-column grid; items are placed with `order` so the markup order
      doesn't have to match the visual layout. Collapses on narrower screens. */
   /* tabs */
-  .tabs{display:flex; gap:4px; background:var(--surface-2); padding:4px; border-radius:12px;
-    margin-bottom:16px; width:fit-content; max-width:100%; flex-wrap:wrap}
-  .tabs button{font:inherit; font-size:13px; font-weight:600; color:var(--text-3);
-    background:transparent; border:0; border-radius:9px; padding:8px 18px; cursor:pointer;
+  /* tabs share the same pill language as the right-side header chips:
+     fully-rounded, --surface fill, thin border, soft shadow. The active tab
+     keeps the accent fill so navigation still reads as navigation. */
+  .tabs{display:flex; gap:8px; width:fit-content; max-width:100%;
+    flex-wrap:wrap; margin-left:34px}
+  .tabs button{font:inherit; font-size:12.5px; font-weight:600; color:var(--text-2);
+    background:var(--surface); border:1px solid var(--border); border-radius:999px;
+    padding:7px 16px; cursor:pointer; box-shadow:var(--shadow);
     transition:.15s; white-space:nowrap}
-  .tabs button:hover{color:var(--text-2)}
-  .tabs button.on{background:var(--surface); color:var(--text); box-shadow:var(--shadow)}
+  .tabs button:hover{color:var(--text); border-color:var(--border-strong)}
+  .tabs button.on{background:var(--accent); color:#fff; border-color:transparent;
+    box-shadow:var(--shadow)}
   /* Two classes, so these beat the single-class `.dash{display:grid}` rule
      below regardless of declaration order. */
   .dash.tab-panel{display:none}
   .dash.tab-panel.on{display:grid}
-  #liveWrap{position:relative; width:100%; aspect-ratio:16/9; max-height:74vh;
-    background:#000; border-radius:12px; overflow:hidden}
+  #liveWrap{position:relative; width:100%; aspect-ratio:16/9; max-height:66vh;
+    background:#000; border-radius:12px; overflow:hidden; margin:0 auto}
   #liveFrame{position:absolute; inset:0; width:100%; height:100%; border:0; background:#000}
 
   /* health warnings dropdown in the header */
@@ -88,6 +93,7 @@
   .dash section, .dash > div{margin-top:0}
   .span-3{grid-column:span 3}
   .span-4{grid-column:span 4}
+  .span-6{grid-column:span 6}
   .span-8{grid-column:span 8}
   .span-12{grid-column:span 12}
   .colstack{display:flex; flex-direction:column; gap:16px}
@@ -95,12 +101,22 @@
      continuously instead of Cost waiting for the tallest card in row 1 */
   .rightcol{grid-row:span 2}
   .temps-2x2{display:grid; grid-template-columns:1fr 1fr; gap:14px}
+  /* row 1 tiles — printing (hero) · filament (AMS) · temperatures — share one
+     height so the row reads as a clean band. The temp block splits that shared
+     height across its two card rows. `.dash` uses align-items:start, so we opt
+     these three back into stretch individually. */
+  /* every tile stretches to its row's height, so each row reads as an even band:
+     row 1 (printing · filament · temps) and row 2 (temperature · power · cost)
+     each come out level instead of the shorter tiles looking undersized. */
+  #tab-overview{align-items:stretch}
+  #tab-overview .temps-2x2{grid-template-rows:1fr 1fr}
   @media(max-width:1450px){
     .span-3{grid-column:span 6} .span-4{grid-column:span 6} .span-8{grid-column:span 12}
+    .span-6{grid-column:span 12}
     .rightcol{grid-row:auto}   /* rows are rearranged below this width */
   }
   @media(max-width:900px){
-    .span-3,.span-4,.span-8{grid-column:span 12}
+    .span-3,.span-4,.span-6,.span-8{grid-column:span 12}
     .temps-2x2{grid-template-columns:1fr 1fr}
   }
 
@@ -176,6 +192,9 @@
     padding:5px 13px; border-radius:999px; color:#fff; letter-spacing:.01em}
   .job-name{font-size:22px; font-weight:640; letter-spacing:-.02em; margin:12px 0 2px;
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .mw-link{display:inline-flex; align-items:center; gap:4px; font-size:12.5px; font-weight:600;
+    color:var(--accent); text-decoration:none}
+  .mw-link:hover{text-decoration:underline}
   .hero-meta{display:flex; gap:26px; margin-top:16px; flex-wrap:wrap}
   .meta-item{display:flex; flex-direction:column; gap:2px}
   .meta-label{font-size:11px; color:var(--text-3); text-transform:uppercase; letter-spacing:.06em; font-weight:600}
@@ -309,12 +328,15 @@
   .htab td{padding:9px 12px 9px 0; border-top:1px solid var(--border); vertical-align:middle}
   .htab tr:hover td{background:var(--surface-2)}
   .htab .num{text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap}
-  .htab .nm{font-weight:600; max-width:300px; overflow:hidden; text-overflow:ellipsis;
-    white-space:nowrap; cursor:text}
-  .htab .nm:hover{text-decoration:underline dotted var(--text-3); text-underline-offset:3px}
+  .htab .nm{font-weight:600; max-width:320px; cursor:text}
+  .htab .nm .nm-wrap{display:flex; align-items:center; gap:7px}
+  .htab .nm .nm-txt{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0}
+  .htab .nm .nm-txt:hover{text-decoration:underline dotted var(--text-3); text-underline-offset:3px}
   .htab .fil{cursor:text}
   .htab .fil:hover{text-decoration:underline dotted var(--text-3); text-underline-offset:3px}
   .htab .nm .orig{font-weight:400; color:var(--text-3); font-size:11.5px; margin-left:6px}
+  .htab .nm .mw-h{flex:none; color:var(--accent); text-decoration:none; font-weight:700; font-size:13px}
+  .htab .nm .mw-h:hover{text-decoration:underline}
   .nm-input{font:inherit; font-weight:600; width:100%; min-width:180px; padding:4px 7px;
     border-radius:7px; border:1px solid var(--accent); background:var(--surface);
     color:var(--text); outline:none}
@@ -381,6 +403,12 @@
         <div class="sub" id="serial">—</div>
       </div>
     </div>
+    <nav class="tabs" id="tabs">
+      <button data-tab="overview" class="on" data-i18n="Overview">Overview</button>
+      <button data-tab="machine" data-i18n="Machine">Machine</button>
+      <button data-tab="history" data-i18n="Print history">Print history</button>
+      <button data-tab="live" id="liveTabBtn" data-i18n="Live view" style="display:none">Live view</button>
+    </nav>
     <div class="hgap"></div>
     <span class="pill"><span class="dot" id="conn"></span><span id="connText">connecting…</span><span class="upd" id="lastUpd"></span></span>
     <span class="pill" id="wifiChip">
@@ -417,17 +445,10 @@
     <button class="icon-btn" id="themeBtn" title="Toggle theme">◐</button>
   </header>
 
-  <nav class="tabs" id="tabs">
-    <button data-tab="overview" class="on" data-i18n="Overview">Overview</button>
-    <button data-tab="machine" data-i18n="Machine">Machine</button>
-    <button data-tab="history" data-i18n="Print history">Print history</button>
-    <button data-tab="live" id="liveTabBtn" data-i18n="Live view" style="display:none">Live view</button>
-  </nav>
-
   <!-- ============ TAB 1: overview ============ -->
   <div class="dash tab-panel on" id="tab-overview">
 
-  <!-- hero | temperatures | AMS -->
+  <!-- row 1: hero | AMS | temp tiles (top right)   ·   row 2: temperature | power draw (half each, equal height)   ·   cost at bottom -->
     <section class="card hero span-4">
       <div class="ring-wrap">
         <svg class="ring" viewBox="0 0 150 150">
@@ -445,6 +466,7 @@
       <div class="hero-info">
         <span class="statepill" id="statePill">—</span>
         <div class="job-name" id="jobName">No active job</div>
+        <a class="mw-link" id="mwLink" target="_blank" rel="noopener noreferrer" style="display:none"><span data-i18n="View on MakerWorld">View on MakerWorld</span> ↗</a>
         <div class="hero-meta">
           <div class="meta-item"><span class="meta-label" data-i18n="Layer">Layer</span><span class="meta-val" id="layers">—</span></div>
           <div class="meta-item"><span class="meta-label" data-i18n="Remaining">Remaining</span><span class="meta-val" id="eta">—</span></div>
@@ -462,7 +484,7 @@
     <div class="spools" id="spools"></div>
   </section>
 
-  <!-- temperatures (top right, compact 2x2) -->
+  <!-- temperatures (top right, 2x2) -->
   <section class="span-4 temps-2x2 compact">
     <!-- 2x2 order: Nozzle 1 | Nozzle 2  /  Bed | Chamber -->
     <div class="card temp">
@@ -491,8 +513,8 @@
     </div>
   </section>
 
-  <!-- temperature history -->
-  <section class="card span-4">
+  <!-- temperature history (half width) -->
+  <section class="card span-6">
     <div class="chart-head">
       <h3 style="margin:0;font-size:12px;font-weight:650;letter-spacing:.08em;text-transform:uppercase;color:var(--text-3)" data-i18n="Temperatures">Temperatures</h3>
       <span id="recPaused" style="display:none;font-size:12px;color:var(--warn);font-weight:600">⏸ paused</span>
@@ -515,24 +537,8 @@
     <div class="temp-sub" id="chartEmpty" style="display:none">Collecting data…</div>
   </section>
 
-  <!-- cost -->
-  <section class="card span-4" id="costCard" style="display:none">
-    <div class="card-head"><h3 data-i18n="Cost">Cost</h3><span class="meta" id="costMeta"></span></div>
-    <div class="cost-grid">
-      <div class="cost-col">
-        <div class="cost-col-h"><span class="ci" style="background:var(--s-power)"></span><span data-i18n="Power">Power</span></div>
-        <div id="pwRows"></div>
-      </div>
-      <div class="cost-col">
-        <div class="cost-col-h"><span class="ci" style="background:var(--accent)"></span><span data-i18n="Material">Material</span></div>
-        <div id="matRows"></div>
-      </div>
-    </div>
-    <div class="cost-last" id="costLast"></div>
-  </section>
-
-  <!-- power draw (smart plug) -->
-  <section class="card span-4" id="powerCard" style="display:none">
+  <!-- power draw (smart plug, half width) -->
+  <section class="card span-6" id="powerCard" style="display:none">
     <div class="card-head"><h3 data-i18n="Power draw">Power draw</h3><span class="meta" id="powerMeta"></span></div>
     <div class="pwr-row">
       <div><div class="pwr-now"><span id="powerW">—</span><span class="pwr-unit">W</span></div>
@@ -545,6 +551,22 @@
       <svg id="pchart" viewBox="0 0 900 150" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;display:block"></svg>
       <div class="tip" id="ptip"></div>
     </div>
+  </section>
+
+  <!-- cost (bottom) -->
+  <section class="card span-6" id="costCard" style="display:none">
+    <div class="card-head"><h3 data-i18n="Cost">Cost</h3><span class="meta" id="costMeta"></span></div>
+    <div class="cost-grid">
+      <div class="cost-col">
+        <div class="cost-col-h"><span class="ci" style="background:var(--s-power)"></span><span data-i18n="Power">Power</span></div>
+        <div id="pwRows"></div>
+      </div>
+      <div class="cost-col">
+        <div class="cost-col-h"><span class="ci" style="background:var(--accent)"></span><span data-i18n="Material">Material</span></div>
+        <div id="matRows"></div>
+      </div>
+    </div>
+    <div class="cost-last" id="costLast"></div>
   </section>
 
   </div><!-- /tab-overview -->
@@ -663,7 +685,7 @@ const DE = {
   // power card
   "Power draw":"Stromverbrauch", "now":"jetzt", "today":"heute",
   "this month":"dieser Monat", "printing (in range)":"Druck (Zeitraum)",
-  "plug error":"Steckdosen-Fehler",
+  "plug error":"Steckdosen-Fehler", "View on MakerWorld":"Auf MakerWorld ansehen",
   // machine tab
   "Fans & airflow":"Lüfter & Luftstrom", "AI monitoring":"KI-Überwachung",
   "Raw printer data":"Rohdaten des Druckers", "everything the X2D reports":"alles, was der X2D meldet",
@@ -832,6 +854,16 @@ function render(s){
   pill.textContent = t(j.state_label || "—");
   pill.style.background = col;
   $("jobName").textContent = j.name || t("No active job");
+  // MakerWorld link — only when the job carries a design_id (i.e. it came from
+  // MakerWorld, not a self-sliced local print). profile_id deep-links the plate.
+  const mw = $("mwLink");
+  if (j.design_id){
+    let url = "https://makerworld.com/models/" + encodeURIComponent(j.design_id);
+    if (j.profile_id) url += "#profileId-" + encodeURIComponent(j.profile_id);
+    mw.href = url; mw.style.display = "inline-flex";
+  } else {
+    mw.removeAttribute("href"); mw.style.display = "none";
+  }
   $("layers").textContent = (j.layer!=null && j.total_layers) ? j.layer+" / "+j.total_layers : "—";
   $("eta").textContent = fmtEta(j.remaining_min);
   $("spd").textContent = s.speed ? (s.speed.magnitude_pct!=null ? s.speed.magnitude_pct+"%" : "—") : "—";
@@ -1252,6 +1284,7 @@ function startEditFil(cell){
   inp.addEventListener("blur", ()=>finish(true));
 }
 $("histTable").addEventListener("click", e=>{
+  if(e.target.closest("a")) return;   // MakerWorld link: let it open, don't rename
   const nm = e.target.closest("td.nm");
   if(nm){ startEdit(nm); return; }
   const fil = e.target.closest("td.fil");
@@ -1315,15 +1348,21 @@ async function loadPrints(){
       const grams = r.filament_g_manual != null ? r.filament_g_manual : r.filament_g;
       // the cloud's designTitle is the real model name; `name` is the slicer profile
       const auto = r.design_title || r.name || "";
+      // MakerWorld link (only for cloud prints that carry a design_id)
+      const mwUrl = r.design_id
+        ? "https://makerworld.com/models/" + encodeURIComponent(r.design_id)
+          + (r.profile_id ? "#profileId-" + encodeURIComponent(r.profile_id) : "")
+        : null;
       const d0 = r.started_at ? new Date(r.started_at*1000) : null;
       const when = d0 ? d0.toLocaleString([], {month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}) : "—";
       const running = !r.ended_at;
       return `<tr>
         <td style="color:var(--text-2);white-space:nowrap">${when}</td>
         <td class="nm" data-job="${r.job_id}" data-label="${esc(r.label)}" data-name="${esc(auto)}"
-            title="${t("click to rename")}${r.name?" · "+t("slicer profile")+": "+esc(r.name):""}">${
+            title="${t("click to rename")}${r.name?" · "+t("slicer profile")+": "+esc(r.name):""}"><div class="nm-wrap"><span class="nm-txt">${
               esc(r.label || auto) || "—"}${
-              r.label && auto ? `<span class="orig">${esc(auto)}</span>` : ""}</td>
+              r.label && auto ? `<span class="orig">${esc(auto)}</span>` : ""}</span>${
+              mwUrl ? `<a class="mw-h" href="${mwUrl}" target="_blank" rel="noopener noreferrer" title="MakerWorld">↗</a>` : ""}</div></td>
         <td><span class="pill-state ${stateClass(r.final_state)}"${
               r.error_code?` title="printer error ${esc(r.error_code)}"`:""}>${
               running ? t("running") : t(FINAL_LABEL[r.final_state] || r.final_state || "—")}</span>${

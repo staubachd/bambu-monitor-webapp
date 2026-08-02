@@ -240,6 +240,10 @@ def parse_report(raw: dict) -> dict:
 
     stage_id = _num(p.get("stg_cur"), -1)
     state = p.get("gcode_state", "")
+    # MakerWorld reference: design_id maps to makerworld.com/models/<id>.
+    # Self-sliced / local prints report "0" (or empty) — treat those as none.
+    design_id = str(p.get("design_id") or "").strip()
+    profile_id = str(p.get("profile_id") or "").strip()
     return {
         "printer": {
             "serial": raw.get("sn") or (p.get("upgrade_state", {}) or {}).get("sn"),
@@ -259,6 +263,8 @@ def parse_report(raw: dict) -> dict:
             "stage": STAGES.get(stage_id, f"Stage {stage_id}"),
             "file": p.get("gcode_file") or None,
             "task_id": p.get("subtask_id") or p.get("task_id"),
+            "design_id": design_id if design_id and design_id != "0" else None,
+            "profile_id": profile_id or None,
         },
         "temps": {
             "bed": {"cur": _num(p.get("bed_temper")), "target": _num(p.get("bed_target_temper"))},

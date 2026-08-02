@@ -31,13 +31,15 @@ LATE_COLUMNS = {
                "label": "VARCHAR(255)", "design_title": "VARCHAR(255)",
                "filament_g": "FLOAT", "filament_g_manual": "FLOAT",
                "filament_detail": "TEXT", "filament_cost": "FLOAT",
-               "ams_bambu": "TEXT", "error_code": "VARCHAR(64)"},
+               "ams_bambu": "TEXT", "error_code": "VARCHAR(64)",
+               "design_id": "VARCHAR(32)", "profile_id": "VARCHAR(32)"},
 }
 
 PRINT_COLS = ["job_id", "name", "started_at", "ended_at", "final_state",
               "total_layers", "energy_wh", "cost", "peak_w", "label",
               "design_title", "filament_g", "filament_g_manual",
-              "filament_detail", "filament_cost", "ams_bambu", "error_code"]
+              "filament_detail", "filament_cost", "ams_bambu", "error_code",
+              "design_id", "profile_id"]
 
 # Never touched by upsert_print's UPDATE branch (which runs from the MQTT loop):
 #   started_at        - so a restart mid-print can't rewrite when the job began

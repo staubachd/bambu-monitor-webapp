@@ -40,6 +40,7 @@ with open(CONFIG_PATH, encoding="utf-8") as fh:
 REPORT_TOPIC = f"device/{CFG['serial']}/report"
 REQUEST_TOPIC = f"device/{CFG['serial']}/request"
 PUSHALL = json.dumps({"pushing": {"sequence_id": "0", "command": "pushall"}})
+GET_VERSION = json.dumps({"info": {"sequence_id": "0", "command": "get_version"}})
 
 STORE_CFG = CFG.get("storage", {"backend": "sqlite"})
 # resolve a relative sqlite path against this dir so cwd doesn't matter
@@ -109,6 +110,10 @@ _subscribers: list[queue.Queue] = []
 _subs_lock = threading.Lock()
 _last_record = {"ts": 0.0, "state": None}
 _last_raw: dict = {"data": None}  # last full raw report, served by /api/raw
+# Firmware version from the get_version reply. The report's `ver` field is an
+# internal number (e.g. 20000), NOT the user-facing firmware - that is the
+# 'ota' module's sw_ver (e.g. 01.02.00.00), fetched separately on connect.
+_versions: dict = {"firmware": None}
 
 
 def _covered_raw_keys() -> list:
@@ -169,7 +174,8 @@ def _accumulate_job_energy(watts) -> None:
         _job_energy["last_ts"] = None          # pause the integration when idle
 
 
-_print_row = {"job_id": None, "started_at": None, "peak_w": 0.0, "seen_active": False}
+_print_row = {"job_id": None, "started_at": None, "peak_w": 0.0, "seen_active": False,
+              "design_id": None, "profile_id": None}
 _last_print_write = {"ts": 0.0, "state": None}
 
 
@@ -200,6 +206,10 @@ def _track_print(state: dict) -> None:
             started_at=(prev or {}).get("started_at") or time.time(),
             peak_w=float((prev or {}).get("peak_w") or 0.0),
             seen_active=bool(prev),   # already known => don't re-stamp the start
+            # seed from the stored row so a resumed print keeps its model link
+            # even before a fresh (possibly partial) report re-supplies it
+            design_id=(prev or {}).get("design_id"),
+            profile_id=(prev or {}).get("profile_id"),
         )
         # Single owner of the per-job energy reset, applied in the same tick the
         # job changes. A print we already know resumes from its stored total; a
@@ -212,6 +222,12 @@ def _track_print(state: dict) -> None:
             # first moment we actually see it printing - that's the real start
             _print_row["started_at"] = time.time()
         _print_row["seen_active"] = True
+    # Latch the MakerWorld reference: Bambu's incremental reports frequently omit
+    # design_id/profile_id, so only overwrite when this frame actually carries them.
+    if job.get("design_id"):
+        _print_row["design_id"] = job["design_id"]
+    if job.get("profile_id"):
+        _print_row["profile_id"] = job["profile_id"]
     w = (state.get("power") or {}).get("watts")
     if w:
         _print_row["peak_w"] = max(_print_row["peak_w"], float(w))
@@ -273,6 +289,8 @@ def _persist_print(state: dict) -> None:
             energy_wh=energy,
             cost=cost,
             peak_w=peak,
+            design_id=_print_row.get("design_id"),
+            profile_id=_print_row.get("profile_id"),
         )
         _print_row["stored"] = {**stored, "energy_wh": energy, "peak_w": peak,
                                 "started_at": _print_row["started_at"],
@@ -305,7 +323,10 @@ def _cost_block() -> dict:
     """Power + material, aggregated per calendar window from the prints table.
 
     Both are per-print so they pair up: 'what printing cost me today/week/month'.
-    Windowed on start time - a print counts toward the day it began.
+    A print counts toward every window it was ACTIVE in (running at any point in
+    it), so a job that spans midnight - or is still running - shows up under
+    'today' instead of leaving it blank. Its full total is attributed to each
+    such window; energy_wh is a single cumulative figure we can't split by day.
     """
     price = float(COST_CFG.get("price_per_kwh", 0) or 0)
     cur = COST_CFG.get("currency", "€")
@@ -324,7 +345,11 @@ def _cost_block() -> dict:
     def window(since):
         pw = pc = mg = mc = 0.0
         for r in prints:
-            if (r.get("started_at") or 0) < since:
+            # active-in-window: skip only prints that already finished before the
+            # window began. A running print (no ended_at) is active now, so it
+            # lands in every current window.
+            ended = r.get("ended_at")
+            if ended is not None and ended < since:
                 continue
             pw += r.get("energy_wh") or 0
             pc += r.get("cost") or 0
@@ -371,6 +396,7 @@ def on_connect(client, userdata, flags, rc, *_):
     if rc == 0:
         client.subscribe(REPORT_TOPIC)
         client.publish(REQUEST_TOPIC, PUSHALL)
+        client.publish(REQUEST_TOPIC, GET_VERSION)  # for the real firmware version
         print(f"[mqtt] connected, subscribed to {REPORT_TOPIC}")
     else:
         print(f"[mqtt] connect failed rc={rc}")
@@ -381,11 +407,18 @@ def on_message(client, userdata, msg):
         raw = json.loads(msg.payload)
     except ValueError:
         return
+    info = raw.get("info")
+    if info and "module" in info:   # get_version reply - grab the real firmware
+        mods = {m.get("name"): m.get("sw_ver") for m in info.get("module") or []}
+        _versions["firmware"] = mods.get("ota") or _versions["firmware"]
+        return
     if "print" not in raw:
         return  # ignore non-status frames
     if len(raw.get("print", {})) > 40:   # keep the last *full* report for /api/raw
         _last_raw["data"] = raw
     state = parse_report(raw)
+    if _versions["firmware"]:   # override the misleading `ver` with the ota version
+        state["printer"]["firmware"] = _versions["firmware"]
     state["connected"] = True
     state["updated_at"] = time.time()
     allowed = _should_record(state)
