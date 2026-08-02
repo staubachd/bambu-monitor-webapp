@@ -4,8 +4,8 @@ A self-hosted monitoring and cost-accounting dashboard for the **Bambu Lab X2D**
 3D printer. It connects to the printer over its **local MQTT** interface, keeps a
 live normalized view of everything the machine reports, records telemetry and
 per-print history to a database, measures real electricity draw via a **Tapo smart
-plug**, enriches finished jobs from the **Bambu Cloud**, and serves a single-page
-web dashboard.
+plug**, enriches finished jobs from the **Bambu Cloud**, offers **live print
+controls**, and serves a single-page web dashboard.
 
 It is designed to run **entirely on a Synology NAS** (alongside an existing app on
 the same box) so nothing depends on a PC being switched on, while still being fully
@@ -42,7 +42,8 @@ runnable on Windows/macOS/Linux for development.
 ## What it does
 
 **Live telemetry**
-- Real-time job state, progress %, current/total layers, time remaining, stage
+- Real-time job state, progress %, current/total layers, time remaining **and
+  estimated finish time** (wall-clock, with the weekday for overnight jobs), stage
 - Both nozzles (current + target temperature, role, active flag), heated bed,
   heated chamber
 - All four fans (part cooling, two aux, heat-break) on a normalized 0–100 % scale
@@ -74,6 +75,23 @@ per print must be accurate)
 - Click-to-override filament grams when the estimate is off
 - Finished jobs are **enriched from the Bambu Cloud** (accurate weights, timing,
   completion status)
+- **MakerWorld links** — jobs sliced from MakerWorld show a link straight to the
+  source model (deep-linked to the exact print profile), on both the live job tile
+  and each history row; the `design_id`/`profile_id` are captured to the database
+
+**Statistics** (own tab)
+- Lifetime analytics over the whole print history: total prints, **success rate**,
+  total print time (+ average), filament used (kg + material €), energy (kWh +
+  power €) and total cost
+- A **per-month** trend (prints + cost) and the **most-printed models** (grouped by
+  MakerWorld model, with count / filament / cost)
+
+**Maintenance reminders** (own tab)
+- Tracks **cumulative print hours** and flags upkeep tasks — general clean, clean
+  X/Y carbon rods, lubricate the Z lead screw, clean fans/filter, hotend cold pull,
+  belt tension — as OK / due-soon / overdue against Bambu's suggested intervals
+- Intervals are **editable** (Bambu's numbers are general guidance, not the exact
+  X2D table), and a **Done** button resets a task's clock at the current hour-mark
 
 **Recording modes** (three-state toggle in the header)
 - **Auto** — record only while a print is active (+ a cool-down tail), so the NAS
@@ -82,8 +100,16 @@ per print must be accurate)
 - **Off** — stop recording **and fully disconnect** the MQTT stream so the app goes
   completely idle (no disk writes, no network chatter)
 
-**Machine controls & inspection**
-- **Chamber LED** on/off toggle in the header (published over MQTT)
+**Machine controls & inspection** (all over local MQTT, behind a **strict
+server-side allowlist** — never a free-form gcode passthrough)
+- **Print flow:** Pause / Resume / Stop, in the job tile only while a print is
+  active (Stop behind a confirm; Pause↔Resume is one context-aware button)
+- **Speed profile:** Silent / Standard / Sport / Ludicrous
+- **Fans:** part-cooling / aux / chamber **sliders** (heat-break stays
+  firmware-managed); the live refresh won't yank a slider mid-drag
+- **Temperature setpoints:** heated **bed** (`M140`) and **chamber** (`M141`),
+  clamped to safe ranges (bed 0–120, chamber 0–60 °C; 0 = off)
+- **Chamber LED** on/off toggle in the header
 - **Raw printer data** browser showing the complete last report from the printer,
   with keys **colour-coded green when the app already consumes them** and white
   when they're still untapped — a live map of what's available to build next
@@ -94,7 +120,8 @@ per print must be accurate)
   camera is configured. See [Live view (camera)](#live-view-camera).
 
 **UI**
-- Tabbed layout: Overview / Machine / Print history (+ Live view when enabled)
+- Tabbed layout: Overview / Machine / Print history / Statistics / Maintenance
+  (+ Live view when enabled)
 - Live updates via Server-Sent Events (no polling from the browser)
 - **German by default with a DE/EN switcher**
 - Light/dark theme toggle
@@ -184,8 +211,10 @@ Design constraints that shaped these choices:
 - TLS is used but the printer's cert is self-signed → verification disabled
   (`CERT_NONE`, `tls_insecure_set(True)`)
 - Subscribe: `device/<serial>/report` (JSON, ~1 Hz)
-- Publish: `device/<serial>/request` — e.g. a `pushall` to request a full state
-  dump, or the `system`/`ledctrl` command to toggle the chamber light
+- Publish: `device/<serial>/request` — a `pushall` to request a full state dump,
+  the `system`/`ledctrl` command to toggle the chamber light, and **print controls**
+  (`pause` / `resume` / `stop`, `print_speed`, and `gcode_line` for fan speeds
+  `M106` and bed/chamber temperatures `M140` / `M141`)
 - No browser web UI exists on the printer, and telemetry works even in Cloud mode.
 
 ### 2. Tapo smart plug (power)
@@ -444,6 +473,11 @@ printer (and re-enable LAN Mode Live View, which a reboot can revert).
 | `GET /api/camera`          | `{ enabled, api_port, src }` — whether the Live view tab shows and how to reach the go2rtc relay (no secrets). |
 | `POST /api/recording`      | Set recording mode `{ "mode": "auto"｜"on"｜"off" }` (persisted).    |
 | `POST /api/led`            | Chamber light `{ "mode": "on"｜"off" }` (needs a live connection).   |
+| `POST /api/print/control`  | Print controls `{ "action": "pause｜resume｜stop｜speed｜fan｜temp", … }` — strict allowlist (speed 1–4, fan `cooling｜aux1｜aux2` %, temp `bed｜chamber` °C). Needs a live connection. |
+| `GET /api/stats`           | Lifetime analytics from the prints table (totals, success rate, per-month, top models). |
+| `GET /api/maintenance`     | Maintenance tasks with hours-since / due status, driven by cumulative print hours. |
+| `POST /api/maintenance/reset` | Mark a maintenance task done (resets its clock to the current hours). |
+| `POST /api/maintenance/config`| Edit a task's interval (or the baseline hour offset).             |
 | `POST /api/prints/label`   | Rename a print (editable job name).                                 |
 | `POST /api/prints/filament`| Override the filament grams for a print.                            |
 | `POST /api/cloud/refresh`  | Trigger an immediate Bambu Cloud enrichment pass.                   |
@@ -461,12 +495,13 @@ migration list, so the schema can evolve without manual `ALTER`s.
   `ts, gcode_state, percent, layer, total_layers, bed_cur, bed_tgt, noz0, noz1,
   noz_tgt, chamber, fan_cooling, speed_mag, wifi_dbm`.
 - **`prints`** — one summary row per job: identity (`job_id`, `name`,
-  `design_title`), timing (`started_at`, `ended_at`), `final_state`, `total_layers`,
-  and the cost fields (energy Wh, filament grams, per-material price, computed cost).
-  Some columns are **immutable once set** (start time, label, filament identity,
-  error code) to keep enrichment from clobbering user edits or live data.
+  `design_title`, and the MakerWorld `design_id` / `profile_id`), timing
+  (`started_at`, `ended_at`), `final_state`, `total_layers`, and the cost fields
+  (energy Wh, filament grams, per-material price, computed cost). Some columns are
+  **immutable once set** (start time, label, filament identity, error code) to keep
+  enrichment from clobbering user edits or live data.
 - **`settings`** — small key/value store (e.g. the persisted recording mode, HMS
-  acknowledgements).
+  acknowledgements, and per-task maintenance intervals / reset marks).
 
 `purge_worker` trims `telemetry` beyond `retention_days`.
 
@@ -501,6 +536,19 @@ A few behaviours are non-obvious because the printer's raw data is messy:
   `status = 4` while a job is still running; enrichment only closes a print on
   `status = 2` and never touches the currently-live job.
 
+- **Cost windows are by activity, not start time.** The today/week/month tiles sum
+  every print that was *running* during the window — not just those that started in
+  it — so a job that spans midnight, or is still printing, counts toward "today"
+  instead of leaving it blank.
+
+- **MakerWorld id survives partial reports.** Bambu's incremental MQTT frames often
+  omit `design_id`/`profile_id`, so they're **latched in memory** while a job prints
+  and persisted from there — a partial update can't null out the stored model link.
+
+- **Maintenance runs on tracked hours.** Upkeep due-dates are measured from
+  cumulative *recorded* print time (summed from completed prints), counting from when
+  tracking began or a task's last **Done** reset — independent of the printer's clock.
+
 - **i18n by degradation.** English strings *are* the translation keys
   (`t(s) = LANG === "de" ? (DE[s] ?? s) : s`), so anything not yet translated shows
   in English rather than as a broken key. Note: `render()`'s local temp variable is
@@ -528,6 +576,9 @@ A few behaviours are non-obvious because the printer's raw data is messy:
 | Cloud login fails                                   | Re-run `tools/setup_cloud.py` to refresh the stored token.                  |
 | Live view spins / no picture                        | Printer serves **one** camera client at a time — close the Handy app / Bambu Studio / other tabs; if wedged, power-cycle the printer and re-enable LAN Mode Live View. Confirm with the `curl … stream.mp4` test. See [Live view](#live-view-camera). |
 | Live view tab missing                               | `camera.enabled` is false, or `/api/camera` reports disabled. Set it in `printer.config.json` and restart. |
+| Print controls do nothing / "printer not connected" | Recording mode is **Off**, which drops the MQTT stream — controls need a live connection. Switch to Auto/On. |
+| A fan slider moves the **wrong** fan                | The `M106` fan mapping (`P1/P2/P3`) can differ per model. Adjust `_FAN_GCODE` in `app.py`. |
+| **Chamber** setpoint has no effect                  | The X2D firmware may not honour `M141` over `gcode_line`. Verify by setting e.g. 40 °C and watching `chamber.target` in the Raw data view; the bed (`M140`) works regardless. |
 
 ---
 
