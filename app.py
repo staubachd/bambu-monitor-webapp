@@ -1083,6 +1083,17 @@ def api_print_control():
             return jsonify({"ok": False, "error": "percent must be 0-100"}), 400
         cmd = {"print": {"sequence_id": "0", "command": "gcode_line",
                          "param": f"M106 {p} S{round(pct * 255 / 100)}"}}
+    elif action == "temp":
+        # bed = M140, chamber = M141 (S0 = off). Clamped to safe ranges.
+        spec = {"bed": (120, "M140"), "chamber": (60, "M141")}.get(data.get("target"))
+        if not spec:
+            return jsonify({"ok": False, "error": "unknown temp target"}), 400
+        hi, mcode = spec
+        try:
+            val = max(0, min(hi, int(data.get("value"))))
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "bad temperature"}), 400
+        cmd = {"print": {"sequence_id": "0", "command": "gcode_line", "param": f"{mcode} S{val}"}}
     else:
         return jsonify({"ok": False, "error": "unknown action"}), 400
     client = _mqtt_client

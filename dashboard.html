@@ -322,6 +322,11 @@
   .ctrl-lbl{font-size:11px; color:var(--text-3); text-transform:uppercase; letter-spacing:.06em; font-weight:600}
   #speedSeg button.on{background:var(--accent); color:#fff}
   .fanrange{flex:1; min-width:90px; accent-color:var(--accent); cursor:pointer; height:8px}
+  /* small "set target" affordance on the bed/chamber temp tiles */
+  .temp-set{position:absolute; top:9px; right:9px; font:inherit; font-size:10.5px; font-weight:600;
+    line-height:1; padding:3px 9px; border-radius:999px; border:1px solid var(--border);
+    background:var(--surface-2); color:var(--text-2); cursor:pointer; transition:.15s}
+  .temp-set:hover{border-color:var(--border-strong); color:var(--text)}
 
   /* label/value rows used by the Fans and Machine cards */
   .rows{display:flex; flex-direction:column; gap:1px}
@@ -569,12 +574,14 @@
       <div class="temp-sub" id="noz1Sub">—</div>
     </div>
     <div class="card temp">
+      <button class="temp-set" data-target="bed" data-i18n="set" title="Set bed target">set</button>
       <div class="temp-label" data-i18n="Bed">Bed</div>
       <div class="temp-val"><span id="bed">—</span><span class="deg">°C</span></div>
       <div class="bar"><span class="fill" id="bedFill"></span><span class="mark" id="bedMark"></span></div>
       <div class="temp-sub" id="bedSub">—</div>
     </div>
     <div class="card temp">
+      <button class="temp-set" data-target="chamber" data-i18n="set" title="Set chamber target">set</button>
       <div class="temp-label" data-i18n="Chamber">Chamber</div>
       <div class="temp-val"><span id="chamber">—</span><span class="deg">°C</span></div>
       <div class="bar"><span class="fill" id="chamberFill"></span><span class="mark" id="chamberMark"></span></div>
@@ -803,6 +810,7 @@ const DE = {
   "Pause":"Pause", "Resume":"Fortsetzen", "Stop":"Stopp",
   "Stop this print? This cannot be undone.":"Diesen Druck stoppen? Kann nicht rückgängig gemacht werden.",
   "Command failed":"Befehl fehlgeschlagen",
+  "set":"setzen", "Set target °C (0 = off):":"Zieltemperatur °C (0 = aus):",
   // machine tab
   "Fans & airflow":"Lüfter & Luftstrom", "AI monitoring":"KI-Überwachung",
   "Raw printer data":"Rohdaten des Druckers", "everything the X2D reports":"alles, was der X2D meldet",
@@ -1704,6 +1712,19 @@ $("fanRows").addEventListener("change", e=>{
   printCtrl({action:"fan", fan:r.dataset.fan, percent:parseInt(r.value,10)});
   fanBusy = false;
 });
+// bed / chamber temperature setpoints (M140 / M141, clamped server-side too)
+function setTempTarget(which){
+  const tp = (lastState && lastState.temps) || {};
+  const cur = which==="bed" ? (tp.bed||{}).target : (tp.chamber||{}).target;
+  const max = which==="bed" ? 120 : 60;
+  const val = prompt(t("Set target °C (0 = off):"), cur!=null ? cur : 0);
+  if(val==null) return;
+  const n = parseInt(val, 10);
+  if(isNaN(n)) return;
+  printCtrl({action:"temp", target:which, value:Math.max(0, Math.min(max, n))});
+}
+document.querySelectorAll(".temp-set").forEach(b=>
+  b.addEventListener("click", ()=> setTempTarget(b.dataset.target)));
 
 /* ---------- live view (go2rtc relay) ---------- */
 let CAM = null;   // {enabled, api_port, src}
