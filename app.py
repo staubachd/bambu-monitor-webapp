@@ -571,6 +571,11 @@ def on_message(client, userdata, msg):
     state["cost"] = _cost_block()
     _track_print(state)
     _maybe_persist_print(state)
+    # surface the saved label / cloud title on the live tile so it matches history
+    _sn = _print_row.get("stored") or {}
+    if state.get("job") and state["job"].get("task_id") == _print_row.get("job_id"):
+        state["job"]["label"] = _sn.get("label")
+        state["job"]["design_title"] = _sn.get("design_title")
     _annotate_acks(state)
     _publish_state(state)
     _maybe_record(state, allowed)
@@ -1025,6 +1030,9 @@ def api_print_label():
     if not job_id:
         return jsonify({"ok": False, "error": "missing job_id"}), 400
     ok = store.set_print_label(job_id, label)
+    # if this is the print currently on screen, reflect the rename right away
+    if job_id == _print_row.get("job_id"):
+        _print_row.setdefault("stored", {})["label"] = label or None
     return jsonify({"ok": ok, "job_id": job_id, "label": label or None})
 
 

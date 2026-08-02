@@ -992,7 +992,8 @@ function render(s){
   const pill=$("statePill");
   pill.textContent = t(j.state_label || "—");
   pill.style.background = col;
-  $("jobName").textContent = j.name || t("No active job");
+  // match the history's naming: your saved label wins, then the cloud title, then raw name
+  $("jobName").textContent = j.label || j.design_title || j.name || t("No active job");
   // MakerWorld link — only when the job carries a design_id (i.e. it came from
   // MakerWorld, not a self-sliced local print). profile_id deep-links the plate.
   const mw = $("mwLink");
