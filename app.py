@@ -59,6 +59,20 @@ RECORD_MODES = ("auto", "on", "off")
 ACTIVE_STATES = {"RUNNING", "PREPARE", "PAUSE", "SLICING"}
 AUTO_TAIL_SEC = float(STORE_CFG.get("auto_tail_min", 10)) * 60
 
+# Default maintenance schedule, in cumulative PRINT hours. Seeded from Bambu's
+# general maintenance guidance (their exact per-model table may differ); every
+# interval is editable from the UI, so it can be dialled in to the X2D's numbers.
+MAINTENANCE_TASKS = [
+    {"key": "clean_general",   "name": "General clean (dust, debris, build plate)", "hours": 50},
+    {"key": "clean_rods",      "name": "Clean X/Y carbon rods (dry - no oil)",       "hours": 100},
+    {"key": "lube_zscrew",     "name": "Lubricate Z-axis lead screw",               "hours": 200},
+    {"key": "clean_fans",      "name": "Clean fans & air filter",                   "hours": 200},
+    {"key": "nozzle_coldpull", "name": "Hotend cold pull / nozzle clean",           "hours": 250},
+    {"key": "belt_tension",    "name": "Check belt tension",                        "hours": 300},
+]
+MAINT_KEYS = {t["key"] for t in MAINTENANCE_TASKS}
+MAINT_URL = "https://wiki.bambulab.com/en/x1/maintenance/basic-maintenance"
+
 
 def _load_mode() -> str:
     raw = store.get_setting("recording", "auto")
@@ -375,6 +389,123 @@ def _cost_block() -> dict:
                     "month": window(t_month)},
         "last": last,
     }
+
+
+def _stats_block() -> dict:
+    """Lifetime analytics over the whole prints table: totals, success rate,
+    per-month trend and the most-printed models."""
+    cur = COST_CFG.get("currency", "€")
+    try:
+        prints = store.all_prints()
+    except Exception:
+        prints = []
+
+    fin = fail = 0
+    dur = eng = pcost = fil = mcost = 0.0
+    durations = []
+    months, models = {}, {}
+    for r in prints:
+        st = r.get("final_state")
+        s, e = r.get("started_at"), r.get("ended_at")
+        g = _grams(r) or 0
+        pc = r.get("cost") or 0
+        mc = r.get("filament_cost") or 0
+        eng += r.get("energy_wh") or 0
+        pcost += pc; fil += g; mcost += mc
+        if st == "FINISH":
+            fin += 1
+        elif st == "FAILED":
+            fail += 1
+        if s and e and e > s:
+            d = e - s
+            dur += d
+            durations.append(d)
+        if s:
+            mk = datetime.fromtimestamp(s).strftime("%Y-%m")
+            mm = months.setdefault(mk, {"month": mk, "prints": 0, "energy_wh": 0.0,
+                                        "cost": 0.0, "filament_g": 0.0})
+            mm["prints"] += 1
+            mm["energy_wh"] += r.get("energy_wh") or 0
+            mm["cost"] += pc + mc
+            mm["filament_g"] += g
+        name = r.get("design_title") or r.get("label") or r.get("name") or "—"
+        mkey = r.get("design_id") or name
+        md = models.setdefault(mkey, {"name": name, "design_id": r.get("design_id"),
+                                      "count": 0, "filament_g": 0.0, "cost": 0.0})
+        md["count"] += 1
+        md["filament_g"] += g
+        md["cost"] += pc + mc
+
+    for mm in months.values():
+        mm["energy_wh"] = round(mm["energy_wh"], 1)
+        mm["cost"] = round(mm["cost"], 2)
+        mm["filament_g"] = round(mm["filament_g"], 1)
+    for md in models.values():
+        md["filament_g"] = round(md["filament_g"], 1)
+        md["cost"] = round(md["cost"], 2)
+
+    completed = fin + fail
+    return {
+        "currency": cur,
+        "totals": {
+            "prints": len(prints), "finished": fin, "failed": fail,
+            "success_rate": round(fin / completed, 4) if completed else None,
+            "print_seconds": round(dur),
+            "avg_seconds": round(dur / len(durations)) if durations else 0,
+            "longest_seconds": round(max(durations)) if durations else 0,
+            "energy_wh": round(eng, 1), "power_cost": round(pcost, 4),
+            "filament_g": round(fil, 1), "material_cost": round(mcost, 4),
+            "total_cost": round(pcost + mcost, 4),
+        },
+        "by_month": [months[k] for k in sorted(months)][-12:],
+        "top_models": sorted(models.values(), key=lambda x: -x["count"])[:8],
+    }
+
+
+def _recorded_print_hours() -> float:
+    """Cumulative printing time from completed prints, in hours."""
+    total = 0.0
+    try:
+        for r in store.all_prints():
+            s, e = r.get("started_at"), r.get("ended_at")
+            if s and e and e > s:
+                total += (e - s)
+    except Exception:
+        pass
+    return total / 3600.0
+
+
+def _setting_float(key: str, default: float) -> float:
+    try:
+        return float(store.get_setting(key, default) or default)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _maintenance_block() -> dict:
+    """Per-task maintenance status driven by cumulative print hours. Each task's
+    'since' is measured from its last reset; overdue at >=interval, soon at >=80%."""
+    recorded = _recorded_print_hours()
+    offset = _setting_float("maint_offset_hours", 0.0)
+    tasks = []
+    for tk in MAINTENANCE_TASKS:
+        key = tk["key"]
+        interval = _setting_float(f"maint_interval_{key}", tk["hours"])
+        reset = _setting_float(f"maint_reset_{key}", 0.0)
+        since = max(0.0, recorded - reset)
+        if since >= interval:
+            status = "overdue"
+        elif interval and since >= interval * 0.8:
+            status = "soon"
+        else:
+            status = "ok"
+        tasks.append({
+            "key": key, "name": tk["name"], "interval_hours": round(interval, 1),
+            "since_hours": round(since, 1), "due_in_hours": round(interval - since, 1),
+            "status": status, "last_reset_hours": round(reset, 1),
+        })
+    return {"recorded_hours": round(recorded, 1), "offset_hours": round(offset, 1),
+            "total_hours": round(recorded + offset, 1), "url": MAINT_URL, "tasks": tasks}
 
 
 def _publish_state(new_state: dict) -> None:
@@ -795,6 +926,46 @@ def api_prints():
     return jsonify({"currency": cost["currency"], "prints": rows})
 
 
+@app.route("/api/stats")
+def api_stats():
+    return jsonify(_stats_block())
+
+
+@app.route("/api/maintenance")
+def api_maintenance():
+    return jsonify(_maintenance_block())
+
+
+@app.route("/api/maintenance/reset", methods=["POST"])
+def api_maintenance_reset():
+    data = request.get_json(force=True, silent=True) or {}
+    key = data.get("key")
+    if key not in MAINT_KEYS:
+        return jsonify({"ok": False, "error": "unknown task"}), 400
+    # stamp this task as just-done at the current cumulative print hours
+    store.set_setting(f"maint_reset_{key}", _recorded_print_hours())
+    return jsonify({"ok": True, **_maintenance_block()})
+
+
+@app.route("/api/maintenance/config", methods=["POST"])
+def api_maintenance_config():
+    data = request.get_json(force=True, silent=True) or {}
+    if "offset_hours" in data:
+        try:
+            store.set_setting("maint_offset_hours", max(0.0, float(data["offset_hours"])))
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "bad offset"}), 400
+    key = data.get("key")
+    if key is not None:
+        if key not in MAINT_KEYS:
+            return jsonify({"ok": False, "error": "unknown task"}), 400
+        try:
+            store.set_setting(f"maint_interval_{key}", max(1.0, float(data.get("interval_hours"))))
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "bad interval"}), 400
+    return jsonify({"ok": True, **_maintenance_block()})
+
+
 @app.route("/api/cloud/refresh", methods=["POST"])
 def api_cloud_refresh():
     if not CLOUD_CFG.get("enabled"):
@@ -883,6 +1054,45 @@ def api_recording():
     _publish_state(cur)
     return jsonify({"ok": True, "mode": mode, "active": cur["recording_active"],
                     "stream": cur["stream_enabled"]})
+
+
+_SPEED_PARAMS = {"1", "2", "3", "4"}                 # Silent / Standard / Sport / Ludicrous
+_FAN_GCODE = {"cooling": "P1", "aux1": "P2", "aux2": "P3"}   # M106 P<n> S<0-255>
+
+
+@app.route("/api/print/control", methods=["POST"])
+def api_print_control():
+    """Print-flow controls over the local MQTT request topic. Strict allowlist -
+    never a free-form gcode passthrough - so the command surface stays tight."""
+    data = request.get_json(force=True, silent=True) or {}
+    action = data.get("action")
+    if action in ("pause", "resume", "stop"):
+        cmd = {"print": {"sequence_id": "0", "command": action}}
+    elif action == "speed":
+        param = str(data.get("param", ""))
+        if param not in _SPEED_PARAMS:
+            return jsonify({"ok": False, "error": "speed must be 1-4"}), 400
+        cmd = {"print": {"sequence_id": "0", "command": "print_speed", "param": param}}
+    elif action == "fan":
+        p = _FAN_GCODE.get(data.get("fan"))
+        if not p:
+            return jsonify({"ok": False, "error": "unknown fan"}), 400
+        try:
+            pct = max(0, min(100, int(data.get("percent"))))
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "percent must be 0-100"}), 400
+        cmd = {"print": {"sequence_id": "0", "command": "gcode_line",
+                         "param": f"M106 {p} S{round(pct * 255 / 100)}"}}
+    else:
+        return jsonify({"ok": False, "error": "unknown action"}), 400
+    client = _mqtt_client
+    if client is None:
+        return jsonify({"ok": False, "error": "printer not connected"}), 409
+    try:
+        client.publish(REQUEST_TOPIC, json.dumps(cmd))
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)[:120]}), 500
+    return jsonify({"ok": True})
 
 
 @app.route("/api/led", methods=["POST"])

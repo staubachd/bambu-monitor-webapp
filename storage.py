@@ -273,6 +273,19 @@ class Storage:
             out = [dict(zip(PRINT_COLS, r)) for r in rows]
         return out
 
+    def all_prints(self) -> list[dict]:
+        """Every print row, newest-first - for the stats/maintenance aggregations
+        that need the full history rather than a recent window."""
+        conn, cur = self._cursor()
+        cur.execute(f"SELECT {','.join(PRINT_COLS)} FROM prints ORDER BY started_at DESC")
+        rows = cur.fetchall()
+        if self.backend == "sqlite":
+            out = [dict(r) for r in rows]
+        else:
+            cur.close(); conn.close()
+            out = [dict(zip(PRINT_COLS, r)) for r in rows]
+        return out
+
     # ---- key/value settings (survive restarts) ----
     def get_setting(self, key: str, default=None):
         conn, cur = self._cursor()

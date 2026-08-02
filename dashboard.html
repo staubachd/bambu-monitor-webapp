@@ -63,11 +63,13 @@
   /* tabs share the same pill language as the right-side header chips:
      fully-rounded, --surface fill, thin border, soft shadow. The active tab
      keeps the accent fill so navigation still reads as navigation. */
-  .tabs{display:flex; gap:8px; width:fit-content; max-width:100%;
-    flex-wrap:wrap; margin-left:34px}
+  .tabs{display:flex; gap:6px; width:fit-content; max-width:100%;
+    flex-wrap:wrap; margin-left:34px;
+    padding:5px; background:var(--surface-2);
+    border:1px solid var(--border); border-radius:999px}
   .tabs button{font:inherit; font-size:12.5px; font-weight:600; color:var(--text-2);
     background:var(--surface); border:1px solid var(--border); border-radius:999px;
-    padding:7px 16px; cursor:pointer; box-shadow:var(--shadow);
+    padding:7px 16px; cursor:pointer;
     transition:.15s; white-space:nowrap}
   .tabs button:hover{color:var(--text); border-color:var(--border-strong)}
   .tabs button.on{background:var(--accent); color:#fff; border-color:transparent;
@@ -308,6 +310,19 @@
   .errbar{margin-top:10px; font-size:12.5px; font-weight:600; color:#fff; background:var(--danger);
     border-radius:9px; padding:8px 12px}
 
+  /* print controls in the hero tile (only shown while a job is active) */
+  .job-ctrl{display:flex; align-items:center; gap:10px; margin-top:16px; flex-wrap:wrap}
+  .ctrl-btn{font:inherit; font-size:12.5px; font-weight:650; padding:8px 15px; border-radius:9px;
+    border:1px solid var(--border); background:var(--surface); color:var(--text); cursor:pointer;
+    box-shadow:var(--shadow); transition:.15s; white-space:nowrap}
+  .ctrl-btn:hover{border-color:var(--border-strong)}
+  .ctrl-btn.danger{color:var(--danger); border-color:var(--danger)}
+  .ctrl-btn.danger:hover{background:var(--danger); color:#fff}
+  .ctrl-speed{display:flex; align-items:center; gap:8px}
+  .ctrl-lbl{font-size:11px; color:var(--text-3); text-transform:uppercase; letter-spacing:.06em; font-weight:600}
+  #speedSeg button.on{background:var(--accent); color:#fff}
+  .fanrange{flex:1; min-width:90px; accent-color:var(--accent); cursor:pointer; height:8px}
+
   /* label/value rows used by the Fans and Machine cards */
   .rows{display:flex; flex-direction:column; gap:1px}
   .row{display:flex; align-items:center; gap:12px; padding:8px 0;
@@ -337,6 +352,44 @@
   .htab .nm .orig{font-weight:400; color:var(--text-3); font-size:11.5px; margin-left:6px}
   .htab .nm .mw-h{flex:none; color:var(--accent); text-decoration:none; font-weight:700; font-size:13px}
   .htab .nm .mw-h:hover{text-decoration:underline}
+
+  /* ---------- statistics ---------- */
+  .kpis{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:18px}
+  .kpi{display:flex; flex-direction:column; gap:3px}
+  .kpi .kl{font-size:11px; color:var(--text-3); text-transform:uppercase; letter-spacing:.06em; font-weight:600}
+  .kpi .kv{font-size:26px; font-weight:680; letter-spacing:-.02em; font-variant-numeric:tabular-nums}
+  .kpi .ks{font-size:11.5px; color:var(--text-2); min-height:14px}
+  .mbars{display:flex; flex-direction:column; gap:10px}
+  .mbar{display:grid; grid-template-columns:58px 1fr auto; gap:11px; align-items:center; font-size:12.5px}
+  .mbar .ml{color:var(--text-2); white-space:nowrap}
+  .mbar .mt{height:9px; border-radius:5px; background:var(--surface-2); overflow:hidden}
+  .mbar .mt>span{display:block; height:100%; background:var(--accent); border-radius:5px}
+  .mbar .mv{color:var(--text-3); font-variant-numeric:tabular-nums; white-space:nowrap}
+  .tmodels{display:flex; flex-direction:column}
+  .tmodel{display:grid; grid-template-columns:1fr auto; gap:12px; align-items:baseline;
+    padding:9px 0; border-top:1px solid var(--border)}
+  .tmodel:first-child{border-top:0}
+  .tmodel .tn{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600}
+  .tmodel .tc{color:var(--text-3); font-size:12px; white-space:nowrap}
+  .tmodel .tc .cnt{color:var(--text); font-weight:700}
+
+  /* ---------- maintenance ---------- */
+  .mnt{display:flex; flex-direction:column}
+  .mnt-row{display:grid; grid-template-columns:minmax(0,1fr) 160px 96px auto; gap:14px;
+    align-items:center; padding:12px 0; border-top:1px solid var(--border)}
+  .mnt-row:first-child{border-top:0}
+  .mnt-name{font-weight:600; font-size:13px}
+  .mnt-sub{font-size:11.5px; color:var(--text-3); margin-top:2px}
+  .mnt-iv{cursor:pointer; text-decoration:underline dotted var(--text-3); text-underline-offset:2px}
+  .mnt-iv:hover{color:var(--text)}
+  .mnt-bar{height:8px; border-radius:5px; background:var(--surface-2); overflow:hidden}
+  .mnt-bar>span{display:block; height:100%; border-radius:5px}
+  .mnt-due{font-size:12px; text-align:right; font-variant-numeric:tabular-nums; font-weight:600}
+  .mnt-note{margin-top:12px; font-size:11.5px; color:var(--text-3)}
+  @media(max-width:640px){
+    .mnt-row{grid-template-columns:minmax(0,1fr) auto; row-gap:8px}
+    .mnt-bar{grid-column:1/-1; order:3}
+  }
   .nm-input{font:inherit; font-weight:600; width:100%; min-width:180px; padding:4px 7px;
     border-radius:7px; border:1px solid var(--accent); background:var(--surface);
     color:var(--text); outline:none}
@@ -407,6 +460,8 @@
       <button data-tab="overview" class="on" data-i18n="Overview">Overview</button>
       <button data-tab="machine" data-i18n="Machine">Machine</button>
       <button data-tab="history" data-i18n="Print history">Print history</button>
+      <button data-tab="stats" data-i18n="Statistics">Statistics</button>
+      <button data-tab="maintenance" data-i18n="Maintenance">Maintenance</button>
       <button data-tab="live" id="liveTabBtn" data-i18n="Live view" style="display:none">Live view</button>
     </nav>
     <div class="hgap"></div>
@@ -470,10 +525,24 @@
         <div class="hero-meta">
           <div class="meta-item"><span class="meta-label" data-i18n="Layer">Layer</span><span class="meta-val" id="layers">—</span></div>
           <div class="meta-item"><span class="meta-label" data-i18n="Remaining">Remaining</span><span class="meta-val" id="eta">—</span></div>
+          <div class="meta-item"><span class="meta-label" data-i18n="Ends">Ends</span><span class="meta-val" id="endTime">—</span></div>
           <div class="meta-item"><span class="meta-label" data-i18n="Speed">Speed</span><span class="meta-val" id="spd">—</span></div>
         </div>
         <div class="stage" id="stage"></div>
         <div class="errbar" id="errBar" style="display:none"></div>
+        <div class="job-ctrl" id="jobCtrl" style="display:none">
+          <button class="ctrl-btn" id="btnPauseResume"></button>
+          <button class="ctrl-btn danger" id="btnStop">■ <span data-i18n="Stop">Stop</span></button>
+          <div class="ctrl-speed">
+            <span class="ctrl-lbl" data-i18n="Speed">Speed</span>
+            <div class="seg" id="speedSeg">
+              <button data-sp="1" data-i18n="Silent">Silent</button>
+              <button data-sp="2" data-i18n="Standard">Standard</button>
+              <button data-sp="3" data-i18n="Sport">Sport</button>
+              <button data-sp="4" data-i18n="Ludicrous">Ludicrous</button>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -612,6 +681,34 @@
     </section>
   </div><!-- /tab-history -->
 
+  <!-- ============ TAB: statistics ============ -->
+  <div class="dash tab-panel" id="tab-stats">
+    <section class="card span-12">
+      <div class="card-head"><h3 data-i18n="Statistics">Statistics</h3><span class="meta" data-i18n="all recorded prints">all recorded prints</span></div>
+      <div class="kpis" id="statKpis"></div>
+    </section>
+    <section class="card span-6">
+      <div class="card-head"><h3 data-i18n="Prints per month">Prints per month</h3></div>
+      <div class="mbars" id="statMonths"></div>
+    </section>
+    <section class="card span-6">
+      <div class="card-head"><h3 data-i18n="Top models">Top models</h3></div>
+      <div class="tmodels" id="statModels"></div>
+    </section>
+  </div><!-- /tab-stats -->
+
+  <!-- ============ TAB: maintenance ============ -->
+  <div class="dash tab-panel" id="tab-maintenance">
+    <section class="card span-12" id="maintCard">
+      <div class="card-head">
+        <h3 data-i18n="Maintenance">Maintenance</h3><span class="meta" id="maintMeta"></span>
+        <a id="maintWiki" href="#" target="_blank" rel="noopener noreferrer" class="mw-h" style="margin-left:auto" data-i18n="Bambu guide ↗">Bambu guide ↗</a>
+      </div>
+      <div class="mnt" id="maintRows"></div>
+      <div class="mnt-note" data-i18n="Intervals are Bambu's general guidance — click one to tune it for your X2D.">Intervals are Bambu's general guidance — click one to tune it for your X2D.</div>
+    </section>
+  </div><!-- /tab-maintenance -->
+
   <div class="dash tab-panel" id="tab-live">
     <section class="card span-12">
       <div class="card-head">
@@ -650,7 +747,7 @@ const DE = {
   "No warnings reported":"Keine Warnungen gemeldet", "look up ↗":"nachschlagen ↗",
   "Code":"Code",
   // print / states
-  "No active job":"Kein aktiver Druck", "Layer":"Layer", "Remaining":"Restzeit",
+  "No active job":"Kein aktiver Druck", "Layer":"Layer", "Remaining":"Restzeit", "Ends":"Ende",
   "Speed":"Geschwindigkeit", "Now":"Jetzt",
   "Idle":"Bereit", "Printing":"Printing", "Paused":"Pausiert", "Finished":"Fertig",
   "Failed":"Fehlgeschlagen", "Preparing":"Vorbereitung", "Slicing":"Slicing",
@@ -686,6 +783,26 @@ const DE = {
   "Power draw":"Stromverbrauch", "now":"jetzt", "today":"heute",
   "this month":"dieser Monat", "printing (in range)":"Druck (Zeitraum)",
   "plug error":"Steckdosen-Fehler", "View on MakerWorld":"Auf MakerWorld ansehen",
+  // statistics + maintenance
+  "Statistics":"Statistik", "all recorded prints":"alle erfassten Drucke",
+  "Prints per month":"Drucke pro Monat", "Top models":"Top-Modelle",
+  "Total prints":"Drucke gesamt", "Success rate":"Erfolgsquote",
+  "Print time":"Druckzeit", "Energy":"Energie", "Total cost":"Gesamtkosten", "avg":"Ø",
+  "Maintenance":"Wartung", "of tracked printing":"erfasste Druckzeit",
+  "Bambu guide ↗":"Bambu-Anleitung ↗",
+  "Intervals are Bambu's general guidance — click one to tune it for your X2D.":"Intervalle sind Bambus allgemeine Empfehlung – zum Anpassen an deinen X2D anklicken.",
+  "every":"alle", "since done":"seit erledigt", "in":"in", "overdue":"überfällig",
+  "Done":"Erledigt", "Maintenance interval in print hours:":"Wartungsintervall in Druckstunden:",
+  "General clean (dust, debris, build plate)":"Grundreinigung (Staub, Reste, Druckplatte)",
+  "Clean X/Y carbon rods (dry - no oil)":"X/Y-Karbonstangen reinigen (trocken – kein Öl)",
+  "Lubricate Z-axis lead screw":"Z-Spindel schmieren",
+  "Clean fans & air filter":"Lüfter & Luftfilter reinigen",
+  "Hotend cold pull / nozzle clean":"Hotend Cold-Pull / Düse reinigen",
+  "Check belt tension":"Riemenspannung prüfen",
+  // print controls
+  "Pause":"Pause", "Resume":"Fortsetzen", "Stop":"Stopp",
+  "Stop this print? This cannot be undone.":"Diesen Druck stoppen? Kann nicht rückgängig gemacht werden.",
+  "Command failed":"Befehl fehlgeschlagen",
   // machine tab
   "Fans & airflow":"Lüfter & Luftstrom", "AI monitoring":"KI-Überwachung",
   "Raw printer data":"Rohdaten des Druckers", "everything the X2D reports":"alles, was der X2D meldet",
@@ -776,10 +893,20 @@ function fmtEta(min){
   const h=Math.floor(min/60), m=min%60;
   return (h?h+"h ":"") + m + "m";
 }
+// clock time the print is expected to finish (now + remaining). Adds the weekday
+// when it lands on a later day, so an overnight print isn't misread as "today".
+function fmtEnd(min){
+  if(min==null||min<=0) return "—";
+  const end=new Date(Date.now()+min*60000);
+  const hm=end.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});
+  return end.toDateString()===new Date().toDateString()
+    ? hm : end.toLocaleDateString([],{weekday:"short"})+" "+hm;
+}
 function fmtHmsTs(ts){
   if(!ts || String(ts).length < 12) return "";
-  const s=String(ts);
-  return `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)} ${s.slice(8,10)}:${s.slice(10,12)}`;
+  const s=String(ts);   // printer sends YYYYMMDDHHMMSS (its own wall clock)
+  // German day-first: DD.MM.YYYY, HH:MM (matches the History tab's date style)
+  return `${s.slice(6,8)}.${s.slice(4,6)}.${s.slice(0,4)}, ${s.slice(8,10)}:${s.slice(10,12)}`;
 }
 function warnRow(h, acked){
   const url="https://wiki.bambulab.com/en/x1/troubleshooting/hmscode/"+h.code;
@@ -866,6 +993,7 @@ function render(s){
   }
   $("layers").textContent = (j.layer!=null && j.total_layers) ? j.layer+" / "+j.total_layers : "—";
   $("eta").textContent = fmtEta(j.remaining_min);
+  $("endTime").textContent = fmtEnd(j.remaining_min);
   $("spd").textContent = s.speed ? (s.speed.magnitude_pct!=null ? s.speed.magnitude_pct+"%" : "—") : "—";
 
   // temps
@@ -901,18 +1029,38 @@ function render(s){
     $("stage").innerHTML = `${t("Now")}: <b>${t(j.stage)}</b>` + (j.file?` · <span style="color:var(--text-3)">${j.file.split("/").pop()}</span>`:"");
   } else $("stage").style.display="none";
 
-  // fans & airflow
+  // print controls — only while a job is active (running or paused)
+  const jobActive = j.state==="RUNNING" || j.state==="PAUSE";
+  $("jobCtrl").style.display = jobActive ? "flex" : "none";
+  if(jobActive){
+    const pr=$("btnPauseResume");
+    if(j.state==="PAUSE"){ pr.dataset.action="resume"; pr.innerHTML="▶ "+t("Resume"); }
+    else { pr.dataset.action="pause"; pr.innerHTML="⏸ "+t("Pause"); }
+    const sp = SPEED_PARAM[(s.speed||{}).level] || "";
+    document.querySelectorAll("#speedSeg button").forEach(b=> b.classList.toggle("on", b.dataset.sp===sp));
+  }
+
+  // fans & airflow. The three controllable fans render as sliders; heat-break is
+  // firmware-managed so it stays read-only. Skip the rebuild while a slider is
+  // being dragged (fanBusy) so the live refresh can't yank it out from under you.
   const f=s.fans||{}, mach=s.machine||{};
   const fanRow=(k,v)=> v==null ? "" :
     `<div class="row"><span class="k">${t(k)}</span>
       <span class="track"><span style="width:${v}%"></span></span>
       <span class="v">${v}%</span></div>`;
-  $("fanRows").innerHTML =
-    fanRow("Part cooling", f.cooling) + fanRow("Aux fan", f.aux1) +
-    fanRow("Chamber fan", f.aux2) + fanRow("Heat-break", f.heatbreak) +
-    `<div class="row"><span class="k">${t("Vent box")}</span><span class="v ${mach.vent_enabled?'ok':'no'}">${
-      mach.vent_enabled ? t("on")+" · "+(mach.vent_speed??"–")+"%" : t("off")}</span></div>` +
-    `<div class="row"><span class="k">${t("Airflow mode")}</span><span class="v">${mach.airduct_mode ?? "–"}</span></div>`;
+  const fanCtl=(key,k,v)=> v==null ? "" :
+    `<div class="row"><span class="k">${t(k)}</span>
+      <input type="range" class="fanrange" min="0" max="100" step="5" value="${v}" data-fan="${key}"
+        aria-label="${t(k)}">
+      <span class="v" id="fanv-${key}">${v}%</span></div>`;
+  if(!fanBusy){
+    $("fanRows").innerHTML =
+      fanCtl("cooling","Part cooling", f.cooling) + fanCtl("aux1","Aux fan", f.aux1) +
+      fanCtl("aux2","Chamber fan", f.aux2) + fanRow("Heat-break", f.heatbreak) +
+      `<div class="row"><span class="k">${t("Vent box")}</span><span class="v ${mach.vent_enabled?'ok':'no'}">${
+        mach.vent_enabled ? t("on")+" · "+(mach.vent_speed??"–")+"%" : t("off")}</span></div>` +
+      `<div class="row"><span class="k">${t("Airflow mode")}</span><span class="v">${mach.airduct_mode ?? "–"}</span></div>`;
+  }
 
   // machine info
   const gb = kb => kb==null ? "–" : (kb/1048576).toFixed(2)+" GB";
@@ -1354,7 +1502,7 @@ async function loadPrints(){
           + (r.profile_id ? "#profileId-" + encodeURIComponent(r.profile_id) : "")
         : null;
       const d0 = r.started_at ? new Date(r.started_at*1000) : null;
-      const when = d0 ? d0.toLocaleString([], {month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}) : "—";
+      const when = d0 ? d0.toLocaleString([], {year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}) : "—";
       const running = !r.ended_at;
       return `<tr>
         <td style="color:var(--text-2);white-space:nowrap">${when}</td>
@@ -1388,6 +1536,85 @@ $("histBtn").addEventListener("click", async ()=>{
   loadPrints();
 });
 loadPrints(); setInterval(loadPrints, 60000);
+
+/* ---------- statistics ---------- */
+const durH = s => { if(!s) return "—"; const h=Math.floor(s/3600), m=Math.round((s%3600)/60); return (h?h+"h ":"")+m+"m"; };
+const kwhF = wh => wh==null ? "—" : (wh>=1000 ? (wh/1000).toFixed(2)+" kWh" : Math.round(wh)+" Wh");
+const kgF  = g  => g==null  ? "—" : (g>=1000  ? (g/1000).toFixed(2)+" kg"  : Math.round(g)+" g");
+const monLabel = ym => { const [y,mo]=ym.split("-"); return new Date(+y, +mo-1, 1).toLocaleDateString([], {month:"short", year:"2-digit"}); };
+async function loadStats(){
+  let d;
+  try{ d = await (await fetch("/api/stats")).json(); }catch(_){ return; }
+  const cur=d.currency||"€", tt=d.totals||{};
+  const sr = tt.success_rate==null ? "—" : Math.round(tt.success_rate*100)+"%";
+  $("statKpis").innerHTML = [
+    ["Total prints", tt.prints ?? 0, ""],
+    ["Success rate", sr, `${tt.finished||0} ✓ · ${tt.failed||0} ✗`],
+    ["Print time", durH(tt.print_seconds), `${t("avg")} ${durH(tt.avg_seconds)}`],
+    ["Filament", kgF(tt.filament_g), money(tt.material_cost, cur)],
+    ["Energy", kwhF(tt.energy_wh), money(tt.power_cost, cur)],
+    ["Total cost", money(tt.total_cost, cur), ""],
+  ].map(([l,v,s])=>`<div class="kpi"><span class="kl">${t(l)}</span><span class="kv">${v}</span><span class="ks">${s}</span></div>`).join("");
+  const mm=d.by_month||[], maxP=Math.max(1, ...mm.map(x=>x.prints));
+  $("statMonths").innerHTML = mm.length ? mm.map(x=>
+    `<div class="mbar"><span class="ml">${monLabel(x.month)}</span>`+
+    `<span class="mt"><span style="width:${Math.round(x.prints/maxP*100)}%"></span></span>`+
+    `<span class="mv">${x.prints}× · ${money(x.cost, cur)}</span></div>`).join("")
+    : `<div class="temp-sub">${t("No prints recorded yet — the first one appears here as soon as it starts.")}</div>`;
+  const tm=d.top_models||[];
+  $("statModels").innerHTML = tm.length ? tm.map(x=>
+    `<div class="tmodel"><span class="tn">${esc(x.name)}</span>`+
+    `<span class="tc"><span class="cnt">${x.count}×</span> · ${kgF(x.filament_g)} · ${money(x.cost, cur)}</span></div>`).join("")
+    : `<div class="temp-sub">—</div>`;
+}
+
+/* ---------- maintenance ---------- */
+const maintCol = st => st==="overdue" ? "var(--danger)" : st==="soon" ? "var(--warn)" : "var(--good)";
+async function loadMaint(data){
+  let d = data;
+  if(!d){ try{ d = await (await fetch("/api/maintenance")).json(); }catch(_){ return; } }
+  $("maintMeta").textContent = `${d.recorded_hours} h ${t("of tracked printing")}`;
+  $("maintWiki").href = d.url;
+  $("maintRows").innerHTML = (d.tasks||[]).map(tk=>{
+    const pct = Math.max(0, Math.min(100, tk.interval_hours ? tk.since_hours/tk.interval_hours*100 : 0));
+    const due = tk.due_in_hours>0
+      ? `${t("in")} ${Math.round(tk.due_in_hours)} h`
+      : `${t("overdue")} ${Math.round(Math.abs(tk.due_in_hours))} h`;
+    return `<div class="mnt-row">
+      <div>
+        <div class="mnt-name">${t(tk.name)}</div>
+        <div class="mnt-sub"><span class="mnt-iv" data-key="${tk.key}" data-iv="${tk.interval_hours}">${t("every")} ${Math.round(tk.interval_hours)} h</span> · ${tk.since_hours.toFixed(1)} h ${t("since done")}</div>
+      </div>
+      <div class="mnt-bar"><span style="width:${pct}%;background:${maintCol(tk.status)}"></span></div>
+      <div class="mnt-due" style="color:${maintCol(tk.status)}">${due}</div>
+      <button class="wbtn mnt-done" data-key="${tk.key}">${t("Done")}</button>
+    </div>`;
+  }).join("");
+}
+$("maintCard").addEventListener("click", async e=>{
+  const done = e.target.closest(".mnt-done");
+  if(done){
+    try{
+      const r = await fetch("/api/maintenance/reset", {method:"POST",
+        headers:{"Content-Type":"application/json"}, body:JSON.stringify({key:done.dataset.key})});
+      loadMaint(await r.json());
+    }catch(_){ loadMaint(); }
+    return;
+  }
+  const iv = e.target.closest(".mnt-iv");
+  if(iv){
+    const val = prompt(t("Maintenance interval in print hours:"), iv.dataset.iv);
+    if(val==null) return;
+    const hours = parseFloat(val);
+    if(!(hours>0)) return;
+    try{
+      const r = await fetch("/api/maintenance/config", {method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({key:iv.dataset.key, interval_hours:hours})});
+      loadMaint(await r.json());
+    }catch(_){ loadMaint(); }
+  }
+});
 
 /* ---------- raw payload browser ---------- */
 let rawOpen=false, rawTimer=null;
@@ -1445,6 +1672,39 @@ $("ledBtn").addEventListener("click", async ()=>{
   }catch(_){}   // server re-pushes state via SSE, which flips the button
 });
 
+/* ---------- print controls ---------- */
+const SPEED_PARAM = {Silent:"1", Standard:"2", Sport:"3", Ludicrous:"4"};
+let fanBusy = false;   // true while a fan slider is being dragged (see render)
+async function printCtrl(body){
+  try{
+    const r = await fetch("/api/print/control", {method:"POST",
+      headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+    const j = await r.json();
+    if(!j.ok) alert(t("Command failed")+": "+(j.error||r.status));
+  }catch(_){ alert(t("Command failed")); }
+}
+$("btnPauseResume").addEventListener("click", ()=>
+  printCtrl({action: $("btnPauseResume").dataset.action}));
+$("btnStop").addEventListener("click", ()=>{
+  if(confirm(t("Stop this print? This cannot be undone."))) printCtrl({action:"stop"});
+});
+$("speedSeg").addEventListener("click", e=>{
+  const b = e.target.closest("button");
+  if(b) printCtrl({action:"speed", param:b.dataset.sp});
+});
+// fan sliders live in #fanRows, which render() rebuilds each tick — delegate so
+// the handlers survive the rebuild, and hold off the rebuild while dragging.
+$("fanRows").addEventListener("input", e=>{
+  const r = e.target.closest(".fanrange"); if(!r) return;
+  fanBusy = true;
+  const out = $("fanv-"+r.dataset.fan); if(out) out.textContent = r.value+"%";
+});
+$("fanRows").addEventListener("change", e=>{
+  const r = e.target.closest(".fanrange"); if(!r) return;
+  printCtrl({action:"fan", fan:r.dataset.fan, percent:parseInt(r.value,10)});
+  fanBusy = false;
+});
+
 /* ---------- live view (go2rtc relay) ---------- */
 let CAM = null;   // {enabled, api_port, src}
 function liveUrl(){
@@ -1481,6 +1741,8 @@ function showTab(name){
   // charts use fixed viewBox coordinates so they survive being hidden, but a
   // redraw keeps the hover geometry honest after the panel becomes visible
   if(name === "overview"){ drawChart(); drawPowerChart(); }
+  if(name === "stats"){ loadStats(); }
+  if(name === "maintenance"){ loadMaint(); }
 }
 $("tabs").addEventListener("click", e=>{
   const b = e.target.closest("button");
