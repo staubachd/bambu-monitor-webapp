@@ -87,11 +87,13 @@ per print must be accurate)
   MakerWorld model, with count / filament / cost)
 
 **Maintenance reminders** (own tab)
-- Tracks **cumulative print hours** and flags upkeep tasks — general clean, clean
-  X/Y carbon rods, lubricate the Z lead screw, clean fans/filter, hotend cold pull,
-  belt tension — as OK / due-soon / overdue against Bambu's suggested intervals
-- Intervals are **editable** (Bambu's numbers are general guidance, not the exact
-  X2D table), and a **Done** button resets a task's clock at the current hour-mark
+- Tracks **cumulative print hours** and flags upkeep tasks — general clean, clean &
+  lubricate the X/Y axes, lubricate the X/Y idler pulleys, clean & lubricate the Z
+  lead screws, clean fans/filter, hotend cold pull — as OK / due-soon / overdue,
+  each **linking to its X2D wiki page**
+- Bambu's X2D intervals are **calendar-based** (X/Y ~2 months, Z ~4 months at
+  regular use), converted to print-hours here (~3 h/day); intervals are **editable**
+  and a **Done** button resets a task's clock at the current hour-mark
 
 **Recording modes** (three-state toggle in the header)
 - **Auto** — record only while a print is active (+ a cool-down tail), so the NAS

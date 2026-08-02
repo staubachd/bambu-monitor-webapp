@@ -59,19 +59,27 @@ RECORD_MODES = ("auto", "on", "off")
 ACTIVE_STATES = {"RUNNING", "PREPARE", "PAUSE", "SLICING"}
 AUTO_TAIL_SEC = float(STORE_CFG.get("auto_tail_min", 10)) * 60
 
-# Default maintenance schedule, in cumulative PRINT hours. Seeded from Bambu's
-# general maintenance guidance (their exact per-model table may differ); every
-# interval is editable from the UI, so it can be dialled in to the X2D's numbers.
+# Maintenance schedule for the Bambu Lab X2D. Bambu's official intervals are
+# calendar-based by usage tier (regular use ~1-5 h/day: X/Y axes every 2 months,
+# Z axis every 4 months); converted here to cumulative PRINT hours at ~3 h/day.
+# Every interval is editable from the UI, and each task links to its X2D wiki page.
+_WIKI = "https://wiki.bambulab.com/en"
+MAINT_URL = f"{_WIKI}/x2d/maintenance/periodic-maintenance"
 MAINTENANCE_TASKS = [
-    {"key": "clean_general",   "name": "General clean (dust, debris, build plate)", "hours": 50},
-    {"key": "clean_rods",      "name": "Clean X/Y carbon rods (dry - no oil)",       "hours": 100},
-    {"key": "lube_zscrew",     "name": "Lubricate Z-axis lead screw",               "hours": 200},
-    {"key": "clean_fans",      "name": "Clean fans & air filter",                   "hours": 200},
-    {"key": "nozzle_coldpull", "name": "Hotend cold pull / nozzle clean",           "hours": 250},
-    {"key": "belt_tension",    "name": "Check belt tension",                        "hours": 300},
+    {"key": "clean_general",   "hours": 50,  "name": "General clean (dust, debris, build plate)",
+     "url": MAINT_URL},
+    {"key": "lube_xy",         "hours": 180, "name": "Clean & lubricate the X/Y axes",
+     "url": f"{_WIKI}/p2s/maintenance/lubricate-x-y-z-axis"},
+    {"key": "lube_idler",      "hours": 270, "name": "Lubricate the X/Y idler pulleys",
+     "url": f"{_WIKI}/p2s/maintenance/idler-pulley-lubrication"},
+    {"key": "lube_z",          "hours": 360, "name": "Clean & lubricate the Z lead screws",
+     "url": f"{_WIKI}/p2s/maintenance/lubricate-x-y-z-axis"},
+    {"key": "clean_fans",      "hours": 200, "name": "Clean fans & air filter",
+     "url": MAINT_URL},
+    {"key": "nozzle_coldpull", "hours": 250, "name": "Hotend cold pull / nozzle clean",
+     "url": MAINT_URL},
 ]
 MAINT_KEYS = {t["key"] for t in MAINTENANCE_TASKS}
-MAINT_URL = "https://wiki.bambulab.com/en/x1/maintenance/basic-maintenance"
 
 
 def _load_mode() -> str:
@@ -500,7 +508,8 @@ def _maintenance_block() -> dict:
         else:
             status = "ok"
         tasks.append({
-            "key": key, "name": tk["name"], "interval_hours": round(interval, 1),
+            "key": key, "name": tk["name"], "url": tk.get("url", MAINT_URL),
+            "interval_hours": round(interval, 1),
             "since_hours": round(since, 1), "due_in_hours": round(interval - since, 1),
             "status": status, "last_reset_hours": round(reset, 1),
         })

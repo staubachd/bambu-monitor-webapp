@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bambu X2D Monitor</title>
+<!-- inline SVG favicon: white printer glyph on the brand's indigo gradient (no external asset) -->
+<link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4MT0iMCIgeTE9IjAiIHgyPSIxIiB5Mj0iMSI+PHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjNjM2NmYxIi8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjODE4Y2Y4Ii8+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iOCIgZmlsbD0idXJsKCNnKSIvPjxyZWN0IHg9IjEwLjUiIHk9IjUuNSIgd2lkdGg9IjExIiBoZWlnaHQ9IjYuNSIgcng9IjEuNSIgZmlsbD0iI2ZmZiIvPjxyZWN0IHg9IjYiIHk9IjExIiB3aWR0aD0iMjAiIGhlaWdodD0iOC41IiByeD0iMi41IiBmaWxsPSIjZmZmIi8+PGNpcmNsZSBjeD0iMjEuNSIgY3k9IjE1IiByPSIxLjUiIGZpbGw9IiM2MzY2ZjEiLz48cmVjdCB4PSI5LjUiIHk9IjE3IiB3aWR0aD0iMTMiIGhlaWdodD0iOSIgcng9IjEuNSIgZmlsbD0iI2ZmZiIvPjxyZWN0IHg9IjEyIiB5PSIyMC40IiB3aWR0aD0iOCIgaGVpZ2h0PSIxLjUiIHJ4PSIuNzUiIGZpbGw9IiM4MThjZjgiLz48cmVjdCB4PSIxMiIgeT0iMjMiIHdpZHRoPSI1LjUiIGhlaWdodD0iMS41IiByeD0iLjc1IiBmaWxsPSIjODE4Y2Y4Ii8+PC9zdmc+">
 <style>
   /* ---------- design tokens ---------- */
   :root{
@@ -384,6 +386,8 @@
     align-items:center; padding:12px 0; border-top:1px solid var(--border)}
   .mnt-row:first-child{border-top:0}
   .mnt-name{font-weight:600; font-size:13px}
+  .mnt-name a{color:inherit; text-decoration:none}
+  .mnt-name a:hover{color:var(--accent); text-decoration:underline}
   .mnt-sub{font-size:11.5px; color:var(--text-3); margin-top:2px}
   .mnt-iv{cursor:pointer; text-decoration:underline dotted var(--text-3); text-underline-offset:2px}
   .mnt-iv:hover{color:var(--text)}
@@ -712,7 +716,7 @@
         <a id="maintWiki" href="#" target="_blank" rel="noopener noreferrer" class="mw-h" style="margin-left:auto" data-i18n="Bambu guide ↗">Bambu guide ↗</a>
       </div>
       <div class="mnt" id="maintRows"></div>
-      <div class="mnt-note" data-i18n="Intervals are Bambu's general guidance — click one to tune it for your X2D.">Intervals are Bambu's general guidance — click one to tune it for your X2D.</div>
+      <div class="mnt-note" data-i18n="Bambu's X2D intervals are calendar-based (X/Y ~2 months, Z ~4 months); shown here as print-hours for ~3 h/day. Click an interval to adjust to your usage.">Bambu's X2D intervals are calendar-based (X/Y ~2 months, Z ~4 months); shown here as print-hours for ~3 h/day. Click an interval to adjust to your usage.</div>
     </section>
   </div><!-- /tab-maintenance -->
 
@@ -797,15 +801,15 @@ const DE = {
   "Print time":"Druckzeit", "Energy":"Energie", "Total cost":"Gesamtkosten", "avg":"Ø",
   "Maintenance":"Wartung", "of tracked printing":"erfasste Druckzeit",
   "Bambu guide ↗":"Bambu-Anleitung ↗",
-  "Intervals are Bambu's general guidance — click one to tune it for your X2D.":"Intervalle sind Bambus allgemeine Empfehlung – zum Anpassen an deinen X2D anklicken.",
+  "Bambu's X2D intervals are calendar-based (X/Y ~2 months, Z ~4 months); shown here as print-hours for ~3 h/day. Click an interval to adjust to your usage.":"Bambus X2D-Intervalle sind kalenderbasiert (X/Y ~2 Monate, Z ~4 Monate); hier als Druckstunden bei ~3 h/Tag. Zum Anpassen ein Intervall anklicken.",
   "every":"alle", "since done":"seit erledigt", "in":"in", "overdue":"überfällig",
   "Done":"Erledigt", "Maintenance interval in print hours:":"Wartungsintervall in Druckstunden:",
   "General clean (dust, debris, build plate)":"Grundreinigung (Staub, Reste, Druckplatte)",
-  "Clean X/Y carbon rods (dry - no oil)":"X/Y-Karbonstangen reinigen (trocken – kein Öl)",
-  "Lubricate Z-axis lead screw":"Z-Spindel schmieren",
+  "Clean & lubricate the X/Y axes":"X/Y-Achsen reinigen & schmieren",
+  "Lubricate the X/Y idler pulleys":"X/Y-Umlenkrollen schmieren",
+  "Clean & lubricate the Z lead screws":"Z-Spindeln reinigen & schmieren",
   "Clean fans & air filter":"Lüfter & Luftfilter reinigen",
   "Hotend cold pull / nozzle clean":"Hotend Cold-Pull / Düse reinigen",
-  "Check belt tension":"Riemenspannung prüfen",
   // print controls
   "Pause":"Pause", "Resume":"Fortsetzen", "Stop":"Stopp",
   "Stop this print? This cannot be undone.":"Diesen Druck stoppen? Kann nicht rückgängig gemacht werden.",
@@ -1590,7 +1594,7 @@ async function loadMaint(data){
       : `${t("overdue")} ${Math.round(Math.abs(tk.due_in_hours))} h`;
     return `<div class="mnt-row">
       <div>
-        <div class="mnt-name">${t(tk.name)}</div>
+        <div class="mnt-name"><a href="${tk.url}" target="_blank" rel="noopener noreferrer">${t(tk.name)} ↗</a></div>
         <div class="mnt-sub"><span class="mnt-iv" data-key="${tk.key}" data-iv="${tk.interval_hours}">${t("every")} ${Math.round(tk.interval_hours)} h</span> · ${tk.since_hours.toFixed(1)} h ${t("since done")}</div>
       </div>
       <div class="mnt-bar"><span style="width:${pct}%;background:${maintCol(tk.status)}"></span></div>
