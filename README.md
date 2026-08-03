@@ -73,6 +73,10 @@ per print must be accurate)
   cost breakdown)
 - **Editable job names** (the slicer's subtask name is often not descriptive)
 - Click-to-override filament grams when the estimate is off
+- **Delete a row** (✕ on row hover, behind a confirm) — for test/showcase prints
+  started at the printer itself that shouldn't count toward stats or cost; a
+  running print is refused, and the deleted row can't be re-created by the next
+  telemetry tick (see [How the tricky bits work](#how-the-tricky-bits-work))
 - Finished jobs are **enriched from the Bambu Cloud** (accurate weights, timing,
   completion status)
 - **MakerWorld links** — jobs sliced from MakerWorld show a link straight to the
@@ -127,6 +131,9 @@ server-side allowlist** — never a free-form gcode passthrough)
 - Live updates via Server-Sent Events (no polling from the browser)
 - **German by default with a DE/EN switcher**
 - Light/dark theme toggle
+- Non-blocking **toast** confirmations for actions that change stored data (the
+  deleted row animates out before the table reloads), with errors shown in the
+  same strip instead of a browser `alert()`
 - Charts for temperature and power history rendered as inline SVG (no external JS)
 
 ---
@@ -241,7 +248,7 @@ Design constraints that shaped these choices:
 | **Core runtime** (root)       | The running app — these stay in root; `app.py` imports the modules and serves the HTML. |
 | `app.py`                      | The application: Flask server, MQTT/power/cloud/purge/go2rtc worker threads, all API endpoints, SSE. |
 | `bambu_state.py`              | Pure parser: turns a raw Bambu MQTT report into a clean, stable state dict. No I/O. |
-| `storage.py`                  | Storage abstraction with two backends (sqlite / mariadb), schema, migrations, per-print upserts. |
+| `storage.py`                  | Storage abstraction with two backends (sqlite / mariadb), schema, migrations, per-print upserts/deletes. |
 | `bambu_cloud.py`              | Bambu Cloud client (login, task list) for finished-print enrichment.    |
 | `dashboard.html`             | The entire frontend (HTML + CSS + JS + i18n) in one file.               |
 | `printer.config.json`         | **All configuration and secrets** (printer, plug, cost, filament, storage, cloud, camera). Not committed. |
@@ -482,6 +489,7 @@ printer (and re-enable LAN Mode Live View, which a reboot can revert).
 | `POST /api/maintenance/config`| Edit a task's interval (or the baseline hour offset).             |
 | `POST /api/prints/label`   | Rename a print (editable job name).                                 |
 | `POST /api/prints/filament`| Override the filament grams for a print.                            |
+| `POST /api/prints/delete`  | Delete one print from the history `{ "job_id": … }`. Refuses a currently-running job with **409**; the telemetry time-series is left untouched. |
 | `POST /api/cloud/refresh`  | Trigger an immediate Bambu Cloud enrichment pass.                   |
 | `POST /api/hms/ack`        | Acknowledge / restore an HMS health warning.                        |
 
@@ -501,7 +509,9 @@ migration list, so the schema can evolve without manual `ALTER`s.
   (`started_at`, `ended_at`), `final_state`, `total_layers`, and the cost fields
   (energy Wh, filament grams, per-material price, computed cost). Some columns are
   **immutable once set** (start time, label, filament identity, error code) to keep
-  enrichment from clobbering user edits or live data.
+  enrichment from clobbering user edits or live data. Rows can be deleted from the
+  history page; that removes only the summary row — `telemetry` is a plain time
+  series and isn't owned by any single job.
 - **`settings`** — small key/value store (e.g. the persisted recording mode, HMS
   acknowledgements, and per-task maintenance intervals / reset marks).
 
@@ -547,6 +557,14 @@ A few behaviours are non-obvious because the printer's raw data is messy:
   omit `design_id`/`profile_id`, so they're **latched in memory** while a job prints
   and persisted from there — a partial update can't null out the stored model link.
 
+- **A deleted print has to be tombstoned.** The printer keeps reporting the *last*
+  job's `task_id` for as long as it sits idle, so simply deleting the row would let
+  the next persist tick write it straight back within 60 s. Deleting the currently
+  tracked job therefore records it in an in-memory `_deleted_jobs` set that
+  `_persist_print()` checks; the set is cleared as soon as a new job starts, since
+  nothing older can be resurrected then. Cloud enrichment is safe by construction —
+  it only *updates* rows that already exist.
+
 - **Maintenance runs on tracked hours.** Upkeep due-dates are measured from
   cumulative *recorded* print time (summed from completed prints), counting from when
   tracking began or a task's last **Done** reset — independent of the printer's clock.
@@ -576,6 +594,8 @@ A few behaviours are non-obvious because the printer's raw data is messy:
 | `#1054 Unknown column …` (MariaDB)                  | Backend is on MariaDB but the schema is behind; the column-migration runs on startup — restart the app, or check the config didn't get flipped to sqlite. |
 | Garbled `°`/`€`/umlauts after editing on Windows    | A file was round-tripped through PowerShell; re-edit with a UTF-8-aware tool. |
 | Cloud login fails                                   | Re-run `tools/setup_cloud.py` to refresh the stored token.                  |
+| Deleting a print says **"print is still running"**  | Intentional: the job is active, its energy total is still accumulating and it would be re-created anyway. Delete it once it has finished. |
+| Deleted prints changed the **Statistics/Maintenance** figures | Expected — both aggregate over the `prints` table, so removing a row also removes its hours, energy and filament from the totals. |
 | Live view spins / no picture                        | Printer serves **one** camera client at a time — close the Handy app / Bambu Studio / other tabs; if wedged, power-cycle the printer and re-enable LAN Mode Live View. Confirm with the `curl … stream.mp4` test. See [Live view](#live-view-camera). |
 | Live view tab missing                               | `camera.enabled` is false, or `/api/camera` reports disabled. Set it in `printer.config.json` and restart. |
 | Print controls do nothing / "printer not connected" | Recording mode is **Off**, which drops the MQTT stream — controls need a live connection. Switch to Auto/On. |
