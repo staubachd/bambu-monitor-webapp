@@ -83,6 +83,14 @@
   #liveWrap{position:relative; width:100%; aspect-ratio:16/9; max-height:66vh;
     background:#000; border-radius:12px; overflow:hidden; margin:0 auto}
   #liveFrame{position:absolute; inset:0; width:100%; height:100%; border:0; background:#000}
+  /* remaining / end time on the card-head line, pushed to the right of the caption */
+  #liveHead{flex-wrap:wrap; row-gap:6px}
+  .head-stats{margin-left:auto; display:flex; align-items:baseline; gap:20px}
+  .head-stats .hs{display:flex; align-items:baseline; gap:7px}
+  .head-stats .hs-label{font-size:11px; color:var(--text-3); font-weight:600;
+    text-transform:uppercase; letter-spacing:.06em}
+  .head-stats .hs-val{font-size:15px; font-weight:650; color:var(--text);
+    font-variant-numeric:tabular-nums}
 
   /* health warnings dropdown in the header */
   .hwrap{position:relative}
@@ -754,9 +762,15 @@
 
   <div class="dash tab-panel" id="tab-live">
     <section class="card span-12">
-      <div class="card-head">
+      <div class="card-head" id="liveHead">
         <h3 data-i18n="Live view">Live view</h3>
         <span class="meta" data-i18n="printer camera">printer camera</span>
+        <!-- repeated from the overview hero so the camera can be watched without
+             switching tabs to see how far along the print is -->
+        <div class="head-stats">
+          <span class="hs"><span class="hs-label" data-i18n="Remaining">Remaining</span><span class="hs-val" id="liveEta">—</span></span>
+          <span class="hs"><span class="hs-label" data-i18n="Ends">Ends</span><span class="hs-val" id="liveEnd">—</span></span>
+        </div>
       </div>
       <div id="liveWrap">
         <iframe id="liveFrame" title="Live view" allow="autoplay; fullscreen"
@@ -1058,8 +1072,12 @@ function render(s){
     mw.removeAttribute("href"); mw.style.display = "none";
   }
   $("layers").textContent = (j.layer!=null && j.total_layers) ? j.layer+" / "+j.total_layers : "—";
-  $("eta").textContent = fmtEta(j.remaining_min);
-  $("endTime").textContent = fmtEnd(j.remaining_min);
+  // computed once and shown in two places: the hero and the Live view tab
+  const etaTxt = fmtEta(j.remaining_min), endTxt = fmtEnd(j.remaining_min);
+  $("eta").textContent = etaTxt;
+  $("endTime").textContent = endTxt;
+  $("liveEta").textContent = etaTxt;
+  $("liveEnd").textContent = endTxt;
   $("spd").textContent = s.speed ? (s.speed.magnitude_pct!=null ? s.speed.magnitude_pct+"%" : "—") : "—";
 
   // temps

@@ -124,6 +124,8 @@ server-side allowlist** — never a free-form gcode passthrough)
 - The printer's built-in camera in a **Live view** tab — fully local, relayed
   through a bundled **go2rtc** binary (no cloud, no Docker). Hidden unless a
   camera is configured. See [Live view (camera)](#live-view-camera).
+- **Remaining time and estimated end time** sit on the tab's caption line, so the
+  camera can be watched without switching back to the overview
 
 **UI**
 - Tabbed layout: Overview / Machine / Print history / Statistics / Maintenance
@@ -424,6 +426,10 @@ passthrough, no transcoding, so it's light on the NAS CPU).
 launches + supervises the go2rtc process. The dashboard's Live view tab embeds
 go2rtc's player, and only connects **while the tab is open** so the camera isn't
 streamed 24/7.
+
+The tab's caption line also carries **Remaining** and **Ends** — the same two
+values as the overview hero, fed by the same SSE state, so watching the print
+doesn't mean tabbing back and forth.
 
 ```
 Printer ──RTSPS:322 (H.264)──► go2rtc ──WebRTC/MSE:1984──► Live view tab
