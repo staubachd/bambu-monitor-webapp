@@ -199,6 +199,11 @@ def _accumulate_job_energy(watts) -> None:
 _print_row = {"job_id": None, "started_at": None, "peak_w": 0.0, "seen_active": False,
               "design_id": None, "profile_id": None}
 _last_print_write = {"ts": 0.0, "state": None}
+# Jobs the user deleted from the history. The printer keeps reporting the last
+# job's task_id for as long as it sits idle, so without a tombstone the next
+# persist tick would write the row straight back. Only the job currently being
+# tracked can be resurrected, so the set is cleared when a new job starts.
+_deleted_jobs: set[str] = set()
 
 
 def _track_print(state: dict) -> None:
@@ -233,6 +238,7 @@ def _track_print(state: dict) -> None:
             design_id=(prev or {}).get("design_id"),
             profile_id=(prev or {}).get("profile_id"),
         )
+        _deleted_jobs.clear()   # a new job: nothing old can be written back now
         # Single owner of the per-job energy reset, applied in the same tick the
         # job changes. A print we already know resumes from its stored total; a
         # genuinely new print starts at exactly zero.
@@ -280,6 +286,8 @@ def _persist_print(state: dict) -> None:
     tid = job.get("task_id")
     if not tid or _print_row["job_id"] != tid:
         return
+    if tid in _deleted_jobs:
+        return  # deleted from the history by hand - don't write it back
     if not _print_row["seen_active"]:
         return  # never saw it printing (e.g. we connected after it finished)
     active = job.get("state") in ACTIVE_STATES
@@ -1034,6 +1042,26 @@ def api_print_label():
     if job_id == _print_row.get("job_id"):
         _print_row.setdefault("stored", {})["label"] = label or None
     return jsonify({"ok": ok, "job_id": job_id, "label": label or None})
+
+
+@app.route("/api/prints/delete", methods=["POST"])
+def api_print_delete():
+    """Remove one print from the history (e.g. test prints started at the
+    printer itself). A running print is refused: it would only be re-created by
+    the next persist tick, and its energy totals are still being accumulated."""
+    data = request.get_json(force=True, silent=True) or {}
+    job_id = (data.get("job_id") or "").strip()
+    if not job_id:
+        return jsonify({"ok": False, "error": "missing job_id"}), 400
+    with _state_lock:
+        live = dict(_state.get("job") or {})
+    if str(live.get("task_id") or "") == job_id and live.get("state") in ACTIVE_STATES:
+        return jsonify({"ok": False, "error": "print is still running"}), 409
+    ok = store.delete_print(job_id)
+    # Only the job still being reported can be written back - see _deleted_jobs
+    if job_id == _print_row.get("job_id"):
+        _deleted_jobs.add(job_id)
+    return jsonify({"ok": ok, "job_id": job_id})
 
 
 @app.route("/api/raw")

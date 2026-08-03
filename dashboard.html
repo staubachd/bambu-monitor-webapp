@@ -359,6 +359,32 @@
   .htab .nm .orig{font-weight:400; color:var(--text-3); font-size:11.5px; margin-left:6px}
   .htab .nm .mw-h{flex:none; color:var(--accent); text-decoration:none; font-weight:700; font-size:13px}
   .htab .nm .mw-h:hover{text-decoration:underline}
+  /* delete: revealed on row hover so it can't be hit by accident while scanning */
+  .htab .del{width:1%; padding-right:0; text-align:right}
+  .htab .del-btn{border:0; background:none; cursor:pointer; color:var(--text-3); font:inherit;
+    font-size:14px; line-height:1; padding:4px 7px; border-radius:6px; opacity:0;
+    transition:opacity .15s ease, color .15s ease, background .15s ease}
+  .htab tr:hover .del-btn, .htab .del-btn:focus-visible{opacity:1}
+  .htab .del-btn:hover{color:var(--danger); background:rgba(239,68,68,.12)}
+  @media(hover:none){ .htab .del-btn{opacity:.6} }
+  /* the deleted row slides away before the table reloads, so the change is seen */
+  .htab tr.gone{opacity:0; transform:translateX(18px); transition:opacity .22s ease, transform .22s ease}
+  .htab tr.gone td{background:rgba(239,68,68,.10)}
+
+  /* toast */
+  .toast{position:fixed; left:50%; bottom:26px; z-index:60; transform:translate(-50%,14px);
+    display:flex; align-items:center; gap:9px; max-width:min(420px,calc(100vw - 32px));
+    padding:11px 16px; border-radius:12px; font-size:13px; font-weight:600;
+    background:var(--surface); color:var(--text); border:1px solid var(--border-strong);
+    box-shadow:var(--shadow-lg); opacity:0; pointer-events:none;
+    transition:opacity .2s ease, transform .2s ease}
+  .toast.show{opacity:1; transform:translate(-50%,0)}
+  .toast::before{content:"✓"; font-size:12px; font-weight:800; flex:none; width:18px; height:18px;
+    border-radius:50%; display:grid; place-items:center; color:#fff; background:var(--good)}
+  .toast.bad::before{content:"!"; background:var(--danger)}
+  @media(prefers-reduced-motion:reduce){
+    .toast, .htab tr.gone{transition-duration:.01ms}
+  }
 
   /* ---------- statistics ---------- */
   .kpis{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:18px}
@@ -619,13 +645,19 @@
 
   <!-- power draw (smart plug, half width) -->
   <section class="card span-6" id="powerCard" style="display:none">
-    <div class="card-head"><h3 data-i18n="Power draw">Power draw</h3><span class="meta" id="powerMeta"></span></div>
+    <div class="card-head"><h3 data-i18n="Power draw">Power draw</h3><span class="meta" id="powerMeta"></span>
+      <div class="ranges" id="pranges" style="margin-left:auto">
+        <button data-h="1">1h</button>
+        <button data-h="6" class="on">6h</button>
+        <button data-h="24">24h</button>
+      </div>
+    </div>
     <div class="pwr-row">
       <div><div class="pwr-now"><span id="powerW">—</span><span class="pwr-unit">W</span></div>
            <div class="meta-label" data-i18n="now">now</div></div>
       <div><div class="meta-val" id="powerToday">—</div><div class="meta-label" data-i18n="today">today</div></div>
       <div><div class="meta-val" id="powerMonth">—</div><div class="meta-label" data-i18n="this month">this month</div></div>
-      <div><div class="meta-val" id="powerCost">—</div><div class="meta-label" data-i18n="printing (in range)">printing (in range)</div></div>
+      <div><div class="meta-val" id="powerCost">—</div><div class="meta-label" data-i18n="this print">this print</div></div>
     </div>
     <div class="chart-wrap" style="margin-top:14px">
       <svg id="pchart" viewBox="0 0 900 150" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;display:block"></svg>
@@ -735,9 +767,24 @@
 
 </div>
 
+<!-- transient confirmation, bottom centre; aria-live so it is announced too -->
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
 <script>
 const $ = id => document.getElementById(id);
 const cvar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+/* Short-lived confirmation strip. One element reused for every message, so a
+   second toast replaces the first instead of stacking. */
+let toastTimer = null;
+function toast(msg, bad){
+  const el = $("toast");
+  el.textContent = msg;
+  el.classList.toggle("bad", !!bad);
+  el.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>el.classList.remove("show"), bad ? 5000 : 2800);
+}
 
 /* ---------- i18n ----------
    English strings double as the keys, so untranslated text degrades to English
@@ -792,7 +839,7 @@ const DE = {
   "material pending":"Material folgt", "last print":"letzter Druck",
   // power card
   "Power draw":"Stromverbrauch", "now":"jetzt", "today":"heute",
-  "this month":"dieser Monat", "printing (in range)":"Druck (Zeitraum)",
+  "this month":"dieser Monat", "this print":"dieser Druck",
   "plug error":"Steckdosen-Fehler", "View on MakerWorld":"Auf MakerWorld ansehen",
   // statistics + maintenance
   "Statistics":"Statistik", "all recorded prints":"alle erfassten Drucke",
@@ -840,6 +887,12 @@ const DE = {
   "click to rename":"zum Umbenennen klicken", "slicer profile":"Slicer-Profil",
   "click to override grams":"Gramm manuell überschreiben",
   "custom name":"eigener Name", "grams":"Gramm",
+  "delete this print":"diesen Druck löschen",
+  "Delete this print from the history? This cannot be undone.":
+    "Diesen Druck aus dem Verlauf löschen? Kann nicht rückgängig gemacht werden.",
+  "Could not delete this print.":"Der Druck konnte nicht gelöscht werden.",
+  "Print deleted":"Druck gelöscht",
+  "print is still running":"Druck läuft noch",
   // chart / recording
   "Temperatures":"Temperaturen", "Collecting data…":"Sammle Daten…",
   "paused":"pausiert", "recording paused":"Aufzeichnung pausiert",
@@ -1106,6 +1159,8 @@ function render(s){
     $("powerW").textContent = pw.watts!=null ? Math.round(pw.watts) : "—";
     $("powerToday").textContent = pw.today_wh!=null ? (pw.today_wh/1000).toFixed(2)+" kWh" : "—";
     $("powerMonth").textContent = pw.month_wh!=null ? (pw.month_wh/1000).toFixed(2)+" kWh" : "—";
+    const lastPr=(s.cost||{}).last;   // energy of the current / most recent print
+    $("powerCost").textContent = (lastPr && lastPr.wh!=null) ? (lastPr.wh/1000).toFixed(2)+" kWh" : "—";
     $("powerMeta").textContent = pw.error ? (t("plug error")+": "+pw.error) : "";
     $("powerMeta").style.color = pw.error ? "var(--danger)" : "var(--text-3)";
   } else $("powerCard").style.display="none";
@@ -1238,7 +1293,8 @@ const SERIES=[
 ];
 const SVGNS="http://www.w3.org/2000/svg";
 const M={t:14,r:58,b:24,l:36}, VW=900, VH=200;  // must match the svg viewBox
-let chartData=[], chartHours=6;
+// temperature and power charts keep independent ranges + data (each has its own selector)
+let tempData=[], tempHours=6, powerData=[], powerHours=6;
 const el=(tag,a)=>{const e=document.createElementNS(SVGNS,tag); for(const k in a) e.setAttribute(k,a[k]); return e;};
 // a real temperature reading, not a corrupt/packed leftover
 const sane = v => typeof v==="number" && isFinite(v) && v > -50 && v < 1000;
@@ -1251,16 +1307,20 @@ function niceStep(range, target){
   return (n<=1?1:n<=2?2:n<=5?5:10)*mag;
 }
 
-async function loadHistory(){
-  try{ const r=await fetch("/api/history?hours="+chartHours); chartData=await r.json(); }
-  catch(_){ chartData=[]; }
+async function loadTempHistory(){
+  try{ const r=await fetch("/api/history?hours="+tempHours); tempData=await r.json(); }
+  catch(_){ tempData=[]; }
   drawChart();
+}
+async function loadPowerHistory(){
+  try{ const r=await fetch("/api/history?hours="+powerHours); powerData=await r.json(); }
+  catch(_){ powerData=[]; }
   drawPowerChart();
 }
 function drawChart(){
   const svg=$("chart"); if(!svg) return;
   svg.innerHTML="";
-  const pts=chartData.filter(d=>d.ts);
+  const pts=tempData.filter(d=>d.ts);
   $("chartEmpty").style.display = pts.length<2 ? "block" : "none";
   if(pts.length<2) return;
   const t0=pts[0].ts, t1=pts[pts.length-1].ts||t0+1;
@@ -1316,7 +1376,7 @@ function drawPowerChart(){
   const svg=$("pchart"); if(!svg) return;
   svg.innerHTML="";
   const PW=900, PH=150, m={t:12,r:20,b:24,l:44};
-  const pts=chartData.filter(d=>d.ts && typeof d.power_w==="number" && isFinite(d.power_w) && d.power_w>=0 && d.power_w<10000);
+  const pts=powerData.filter(d=>d.ts && typeof d.power_w==="number" && isFinite(d.power_w) && d.power_w>=0 && d.power_w<10000);
   if(pts.length<2){ $("powerCard") && (document.getElementById("pchart").style.opacity=.35); return; }
   document.getElementById("pchart").style.opacity=1;
   const t0=pts[0].ts, t1=pts[pts.length-1].ts||t0+1;
@@ -1343,15 +1403,6 @@ function drawPowerChart(){
   const last=pts[pts.length-1];
   svg.appendChild(el("circle",{cx:X(last.ts),cy:Y(last.power_w),r:4,fill:c,stroke:cvar("--surface"),"stroke-width":2}));
 
-  // energy used while actually printing, integrated over the visible range
-  let wh=0;
-  for(let i=1;i<pts.length;i++){
-    const a=pts[i-1], b=pts[i], dtH=(b.ts-a.ts)/3600;
-    if(dtH>0 && dtH<0.5 && (a.gcode_state==="RUNNING"||b.gcode_state==="RUNNING"))
-      wh += (a.power_w+b.power_w)/2*dtH;   // trapezoid; skip long gaps
-  }
-  $("powerCost").textContent = wh>0 ? (wh/1000).toFixed(3)+" kWh" : "—";
-
   const cross=el("line",{class:"grid-line",y1:m.t,y2:PH-m.b,stroke:cvar("--muted"),"stroke-dasharray":"3 3",opacity:0}); svg.appendChild(cross);
   const hit=el("rect",{x:m.l,y:m.t,width:PW-m.l-m.r,height:PH-m.t-m.b,fill:"transparent"}); svg.appendChild(hit);
   const tip=$("ptip");
@@ -1372,9 +1423,15 @@ function drawPowerChart(){
 $("ranges").addEventListener("click",e=>{
   if(e.target.tagName!=="BUTTON") return;
   document.querySelectorAll("#ranges button").forEach(b=>b.classList.remove("on"));
-  e.target.classList.add("on"); chartHours=parseFloat(e.target.dataset.h); loadHistory();
+  e.target.classList.add("on"); tempHours=parseFloat(e.target.dataset.h); loadTempHistory();
 });
-loadHistory(); setInterval(loadHistory, 30000);
+$("pranges").addEventListener("click",e=>{
+  if(e.target.tagName!=="BUTTON") return;
+  document.querySelectorAll("#pranges button").forEach(b=>b.classList.remove("on"));
+  e.target.classList.add("on"); powerHours=parseFloat(e.target.dataset.h); loadPowerHistory();
+});
+loadTempHistory(); loadPowerHistory();
+setInterval(()=>{ loadTempHistory(); loadPowerHistory(); }, 30000);
 
 /* ---------- print history ---------- */
 // attribute-safe escaping: job names come from the printer and land in HTML
@@ -1444,7 +1501,32 @@ function startEditFil(cell){
   });
   inp.addEventListener("blur", ()=>finish(true));
 }
+async function deletePrint(job, name, row){
+  if(!confirm(t("Delete this print from the history? This cannot be undone.")
+              + (name ? "\n\n" + name : ""))) return;
+  let d = null;
+  try{
+    d = await (await fetch("/api/prints/delete", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({job_id: job})})).json();
+  }catch(_){}
+  if(!d || !d.ok){
+    toast(t("Could not delete this print.")
+          + (d && d.error ? " (" + t(d.error) + ")" : ""), true);
+    loadPrints();
+    return;
+  }
+  // let the row animate out before the table is rebuilt underneath it
+  if(row){
+    row.classList.add("gone");
+    await new Promise(r=>setTimeout(r, 220));
+  }
+  toast(t("Print deleted") + (name ? ": " + name : ""));
+  loadPrints();
+}
 $("histTable").addEventListener("click", e=>{
+  const del = e.target.closest("button.del-btn");
+  if(del){ deletePrint(del.dataset.job, del.dataset.name, del.closest("tr")); return; }
   if(e.target.closest("a")) return;   // MakerWorld link: let it open, don't rename
   const nm = e.target.closest("td.nm");
   if(nm){ startEdit(nm); return; }
@@ -1504,7 +1586,7 @@ async function loadPrints(){
          <th class="num">${t("Layers")}</th><th class="num">${t("Duration")}</th>
          <th class="num">${t("Energy")}</th><th class="num">${t("Power")}&nbsp;€</th>
          <th class="num">${t("Filament")}</th><th class="num">${t("Filament")}&nbsp;€</th>
-         <th class="num">${t("Total")}</th></tr>` +
+         <th class="num">${t("Total")}</th><th class="del"></th></tr>` +
     rows.map(r=>{
       const grams = r.filament_g_manual != null ? r.filament_g_manual : r.filament_g;
       // the cloud's designTitle is the real model name; `name` is the slicer profile
@@ -1537,6 +1619,9 @@ async function loadPrints(){
               grams!=null ? grams.toFixed(1)+" g" + (r.filament_g_manual!=null?" *":"") : "—"}</td>
         <td class="num">${money(r.filament_cost, cur)}</td>
         <td class="num" style="font-weight:700">${money(r.total_cost, cur)}</td><!-- ceil-2dp -->
+        <td class="del"><button class="del-btn" type="button"
+            data-job="${esc(r.job_id)}" data-name="${esc(r.label || auto)}"
+            title="${t("delete this print")}" aria-label="${t("delete this print")}">✕</button></td><!-- a genuinely live print is refused server-side -->
       </tr>`;
     }).join("");
 }

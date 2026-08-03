@@ -260,6 +260,18 @@ class Storage:
             cur.close(); conn.close()
         return n > 0
 
+    def delete_print(self, job_id: str) -> bool:
+        """Drop one print from the history for good. Telemetry samples are left
+        alone: that table is a plain time series, not owned by any single job."""
+        conn, cur = self._cursor()
+        cur.execute(f"DELETE FROM prints WHERE job_id={self.ph}", (job_id,))
+        n = cur.rowcount
+        if self.backend == "sqlite":
+            conn.commit()
+        else:
+            cur.close(); conn.close()
+        return n > 0
+
     def recent_prints(self, limit: int = 60) -> list[dict]:
         limit = max(1, min(int(limit), 500))   # cast + clamp: never interpolate raw input
         conn, cur = self._cursor()
