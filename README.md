@@ -140,13 +140,20 @@ server-side allowlist** — never a free-form gcode passthrough)
 
 ## Screenshotted at a glance
 
-<img width="1846" height="821" alt="bambuapp" src="https://github.com/user-attachments/assets/dc211da9-0c90-4a82-83dd-ead3afad013e" />
+Overview:
+<img width="1999" height="1121" alt="overview" src="https://github.com/user-attachments/assets/ea4019c7-f876-4b81-9d98-b8095be4118b" />
 
-<img width="1829" height="758" alt="bambuapp2" src="https://github.com/user-attachments/assets/61fc2555-5dfe-482c-b412-285961eff1e3" />
+Machine page:
+<img width="2023" height="824" alt="machine" src="https://github.com/user-attachments/assets/256139ec-9f66-4930-9732-73da9322a894" />
 
-<img width="1842" height="516" alt="bambuapp3" src="https://github.com/user-attachments/assets/2acc2708-de20-4674-9870-4ab5cee69df0" />
+Maintenance:
+<img width="2014" height="642" alt="maintenance" src="https://github.com/user-attachments/assets/16aa5446-d695-454d-b8bb-97366646067d" />
 
+Print history:
+<img width="2019" height="567" alt="print_history" src="https://github.com/user-attachments/assets/f88c826f-99f5-4c5a-abda-04c1a296c749" />
 
+Statistics:
+<img width="2025" height="609" alt="statistics" src="https://github.com/user-attachments/assets/cfa53b64-40b0-4d30-85d3-6522b75d2842" />
 
 ---
 
