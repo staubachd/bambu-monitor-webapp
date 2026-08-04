@@ -73,6 +73,10 @@ per print must be accurate)
 - Filament pricing is a **brand × material matrix** (Bambu vs third-party, PLA vs
   PETG, …), because genuine Bambu spools cost roughly double; per-slot / per-type /
   per-filament-id overrides are supported
+- Genuine Bambu spools can instead be priced **from your own invoices** — the
+  imported orders teach a per-SKU price, so the matrix stops being a number you
+  maintain by hand. The **list** price is used, not the discounted one: a one-off
+  discount is not what replacing that spool will cost
 - Cost tile splits spend into **today / this week / this month** and shows the last
   print, with money always rounded **up** to 2 decimals (a quote must never come
   out under the real cost)
@@ -367,6 +371,9 @@ Structure, with placeholders:
     "per_filament_id": {},         // …by slicer filament id
     "per_type": {},                // …by material type
 
+    "prices_from_orders": true,    // price Bambu spools from your own invoices
+                                   //   (list price per SKU) instead of the
+                                   //   bambu/other matrix above; false = off
     "low_pct": 15,                 // at/below this %, a spool is flagged "Low"
     "store_region": "eu",          // eu | us | uk | jp | global (reorder links)
     "color_names": {               // adds to / corrects the built-in table
@@ -656,6 +663,21 @@ A few behaviours are non-obvious because the printer's raw data is messy:
   trailing-symbol price pattern reads `×1  € 27,99` as *one euro* unless
   symbol-before-number is tried first, and `\b` after `€` never matches at
   end-of-line because `€` isn't a word character.
+
+- **Prints are costed at list price, never at what you paid.** An imported
+  invoice teaches `{SKU: € per kg}` from the *Price* column, not the discounted
+  *Items SubTotal*. Costing a print at a promotional price makes it look cheaper
+  than replacing that filament will be, and a quote built on it comes out under
+  the real figure — the same reasoning that makes every total round up. The
+  Filament page shows both numbers, so the saving stays visible where it belongs.
+
+- **A learned price only applies to a spool the RFID tag vouches for.** A
+  third-party spool sliced with a Bambu profile reports a Bambu SKU, so pricing it
+  from a Bambu invoice would silently inflate it. The rule needs `ams_bambu` to say
+  genuine; otherwise it falls through to the brand × material matrix. Rule order:
+  `per_slot` → `per_filament_id` → **order price** → brand × material → `per_type`
+  → default, so an explicit config override still wins and
+  `prices_from_orders: false` turns the whole thing off.
 
 - **Colour codes are compared canonically, names never are.** The AMS pads the
   colour part of `tray_id_name` to two digits, the store's SKU does not always —

@@ -342,12 +342,15 @@ def parse_bambu_invoice(text: str) -> dict:
             if vm and color is None:
                 # "Absolute Black (17101) /" / "Pine Green(30503) /" -> the name
                 color = re.split(r"[(/]", vm.group(1))[0].strip(" /·-") or None
-        qty = paid = None
+        qty = paid = listp = None
         if amounts:
             qty = int(_AMOUNTS_RE.match(amounts).group(1))
             money = _MONEY_RE.findall(amounts)
             if money:
-                paid = _amount(money[-1])     # Items SubTotal = what was charged
+                # first column is the unit LIST price, last is the line's
+                # "Items SubTotal" - what was actually charged after discount
+                listp = _amount(money[0])
+                paid = _amount(money[-1])
             if currency is None:
                 cm = re.search(r"[€$£¥]", amounts)
                 currency = cm.group(0) if cm else None
@@ -360,6 +363,7 @@ def parse_bambu_invoice(text: str) -> dict:
             "spools": qty,
             "grams_each": float(grams),
             "total_price": paid,
+            "list_price": listp,      # per unit, before any discount
             "currency": currency,
             "refill": pack == "SPLFREE",
         })
@@ -532,6 +536,8 @@ Invoice Date: 2026-07-07
         ("PETG Basic", "G00-G01", "Pine Green",     1, 1000.0, 14.29, False),
         ("PLA Matte",  "A01-R4",  "Dunkelrot",      1, 1000.0, 12.64, True),
     ], got
+    # list price (first money column) vs what was charged (last)
+    assert [l["list_price"] for l in inv["lines"]] == [27.99, 25.99, 22.99]
     assert inv["currency"] == "€"
     # the invoice is the authority on colour names - and proves a guess wrong
     assert color_name("A19-K00") == "Absolute Black"

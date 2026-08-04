@@ -691,6 +691,37 @@ def _color_overrides() -> dict:
     return {**_LEARNED_COLORS, **FIL_COLOR_NAMES}
 
 
+# Per-kg prices taken from your own orders, so the config matrix stops being a
+# number you have to maintain by hand. Keyed by Bambu SKU (GFA00).
+PRICES_FROM_ORDERS = bool(FIL_CFG.get("prices_from_orders", True))
+_ORDER_PRICES: dict = {}
+
+
+def _rebuild_order_prices() -> None:
+    """{SKU: € per kg} from the purchase log; the newest order for a SKU wins.
+
+    Deliberately the LIST price, not what was paid. A one-off discount is not
+    what replacing that spool will cost, and a quote built on it would come out
+    under the real figure - the same reasoning that makes every total round up.
+    """
+    prices = {}
+    try:
+        rows = store.all_purchases()          # newest first
+    except Exception as e:
+        print(f"[filament] could not read purchases for pricing: {e}")
+        return
+    for p in reversed(rows):                  # oldest first, newest overwrites
+        sku = filament_catalog.sku_from_code(p.get("code"))
+        unit, grams = p.get("list_price"), p.get("grams_each")
+        if sku and unit and grams:
+            prices[sku] = round(float(unit) / (float(grams) / 1000.0), 4)
+    _ORDER_PRICES.clear()
+    _ORDER_PRICES.update(prices)
+
+
+_rebuild_order_prices()
+
+
 def _enrich_ams(state: dict) -> None:
     """Annotate every tray in place with colour name, reorder link and a
     low-stock flag. Purely presentational, so it lives here and not in the
@@ -916,6 +947,8 @@ def _filament_stats() -> dict:
             "left_g": round(b["grams"] - a["grams"], 1) if b else None,
             "paid_per_kg": (round(b["cost"] / (b["grams"] / 1000.0), 2)
                             if b and b["grams"] else None),
+            # the undiscounted price per kg this filament is costed at
+            "list_per_kg": _ORDER_PRICES.get((a.get("filament_id") or "").upper()),
             **a,
             "grams": round(a["grams"], 1),
             "cost": round(a["cost"], 4),
@@ -974,6 +1007,7 @@ def _filament_stats() -> dict:
         o["left_g"] = o["bought_g"]
         o["paid_per_kg"] = (round(o["bought_cost"] / (o["bought_g"] / 1000.0), 2)
                             if o["bought_g"] else None)
+        o["list_per_kg"] = _ORDER_PRICES.get((o.get("filament_id") or "").upper())
     out.extend(owned.values())
 
     out.sort(key=lambda x: (-x["grams"], -(x["bought_g"] or 0), x["fkey"]))
@@ -996,7 +1030,9 @@ def _filament_stats() -> dict:
                    "cost": round(sum(a["cost"] for a in agg.values()), 4),
                    "prints": sum(1 for r in prints if _detail_entries(r)),
                    "bought_g": round(bought_g, 1), "spent": round(spent, 2),
-                   "orders": len(purchases)},
+                   "orders": len(purchases), "priced": len(_ORDER_PRICES)},
+        # SKU -> list price per kg, i.e. what per-print costing now uses
+        "order_prices": dict(_ORDER_PRICES) if PRICES_FROM_ORDERS else {},
         "filaments": out,
         "purchases": purchases,
         # logged but not attributable to any filament yet: usually a spool that
@@ -1053,6 +1089,15 @@ def _filament_price_per_kg(entry: dict, bambu_map: dict | None = None) -> tuple:
     by_id = (FIL_CFG.get("per_filament_id") or {}).get(entry.get("filamentId") or "")
     if by_id is not None:
         return float(by_id), entry.get("filamentId")
+    # What you actually paid for that exact SKU, list price, from your own order
+    # history - beats the hand-maintained brand x material guess below. Only for
+    # spools the RFID tag confirms are genuine: a third-party spool sliced with a
+    # Bambu profile reports a Bambu SKU and must not be priced as one.
+    if PRICES_FROM_ORDERS and bambu_map and bambu_map.get(slot):
+        sku = (entry.get("filamentId") or "").upper()
+        learned = _ORDER_PRICES.get(sku)
+        if learned:
+            return learned, f"order {sku}"
     # brand x material is more specific than material alone, so it comes first
     if bambu_map and slot in bambu_map:
         price, rule = _brand_price(bambu_map[slot], entry.get("filamentType"))
@@ -1351,7 +1396,8 @@ def api_purchase_add():
         return jsonify({"ok": False, "error": str(e)[:300]}), 500
     if not added:
         return jsonify({"ok": False, "error": "nothing to save"}), 400
-    return jsonify({"ok": True, "added": added})
+    _rebuild_order_prices()     # new list prices may change what a print costs
+    return jsonify({"ok": True, "added": added, "prices": len(_ORDER_PRICES)})
 
 
 def _store_purchases(rows: list) -> list:
@@ -1372,6 +1418,7 @@ def _store_purchases(rows: list) -> list:
             spools=max(1, spools),
             grams_each=_num_or_none(r.get("grams_each")) or 1000.0,
             total_price=_num_or_none(r.get("total_price")),
+            list_price=_num_or_none(r.get("list_price")),
             currency=(r.get("currency") or COST_CFG.get("currency", "€"))[:8],
             ordered_at=_num_or_none(r.get("ordered_at")),
             order_ref=(r.get("order_ref") or "").strip()[:64] or None,
@@ -1385,7 +1432,9 @@ def api_purchase_delete():
     pid = _num_or_none(data.get("id"), int)
     if pid is None:
         return jsonify({"ok": False, "error": "missing id"}), 400
-    return jsonify({"ok": store.delete_purchase(pid), "id": pid})
+    ok = store.delete_purchase(pid)
+    _rebuild_order_prices()
+    return jsonify({"ok": ok, "id": pid})
 
 
 @app.route("/api/purchases/parse", methods=["POST"])

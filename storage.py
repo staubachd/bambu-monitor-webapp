@@ -37,7 +37,7 @@ LATE_COLUMNS = {
     # `code` arrived with invoice import, one release after the table itself.
     # CREATE TABLE IF NOT EXISTS silently does nothing to an existing table, so
     # every column added later has to be listed here or the INSERT breaks.
-    "purchases": {"code": "VARCHAR(24)"},
+    "purchases": {"code": "VARCHAR(24)", "list_price": "FLOAT"},
 }
 
 PRINT_COLS = ["job_id", "name", "started_at", "ended_at", "final_state",
@@ -68,9 +68,13 @@ FILAMENT_COLS = ["fkey", "filament_id", "code", "product", "color", "color_name"
 # (not per spool) so an order of 3 spools stays one editable, deletable entry.
 # `fkey` links to a filament identity when it is known; when it is not, the free
 # text product/colour still identifies the line on screen.
+#   total_price - what the line actually cost, after discount (line total)
+#   list_price  - the undiscounted price of ONE unit; this is what per-print
+#                 costing uses, because a one-off discount is not what replacing
+#                 that filament will cost you
 PURCHASE_COLS = ["fkey", "code", "product", "color_name", "color", "type",
-                 "spools", "grams_each", "total_price", "currency", "ordered_at",
-                 "order_ref", "note", "created_at"]
+                 "spools", "grams_each", "total_price", "list_price", "currency",
+                 "ordered_at", "order_ref", "note", "created_at"]
 
 
 def _row_from_state(s: dict) -> dict:
@@ -175,7 +179,7 @@ class Storage:
                 product VARCHAR(64), color_name VARCHAR(64),
                 color VARCHAR(8), type VARCHAR(24),
                 spools INT, grams_each FLOAT,
-                total_price FLOAT, currency VARCHAR(8),
+                total_price FLOAT, list_price FLOAT, currency VARCHAR(8),
                 ordered_at DOUBLE, order_ref VARCHAR(64),
                 note VARCHAR(255), created_at DOUBLE
             )""")

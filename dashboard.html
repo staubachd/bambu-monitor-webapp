@@ -462,7 +462,7 @@
   .draft{border:1px dashed var(--accent); border-radius:12px; padding:11px;
     margin:10px 0 4px; background:var(--accent-soft)}
   .draft-row{display:grid; gap:8px; align-items:center; margin-bottom:8px;
-    grid-template-columns:132px minmax(110px,1.4fr) minmax(100px,1.2fr) 60px 74px 84px 92px 28px}
+    grid-template-columns:130px minmax(100px,1.3fr) minmax(94px,1.1fr) 54px 68px 76px 76px 86px 28px}
   .draft-row:last-child{margin-bottom:0}
   .draft input{font:inherit; font-size:12.5px; width:100%; padding:6px 8px; border-radius:8px;
     border:1px solid var(--border-strong); background:var(--surface); color:var(--text);
@@ -1033,6 +1033,12 @@ const DE = {
     "Nichts wird gespeichert, bis du auf Speichern klickst. Das Einlesen ist eine Schätzung – prüfe jede Zeile, besonders Preis und Menge.",
   "Product":"Produkt", "Colour":"Farbe", "colour":"Farbe", "Spools":"Spulen",
   "g each":"g je", "Price":"Preis", "Order":"Bestellung", "order no.":"Bestellnr.",
+  "Paid":"Bezahlt", "List":"Listenpreis", "paid":"bezahlt", "list":"Liste",
+  "what the line actually cost":"was die Zeile tatsächlich gekostet hat",
+  "undiscounted price of one spool — prints are costed at this":
+    "Preis einer Spule ohne Rabatt – damit werden Drucke kalkuliert",
+  "list price before discount":"Listenpreis vor Rabatt",
+  "this is what prints are costed at":"damit werden Drucke kalkuliert",
   "Save":"Speichern", "Cancel":"Abbrechen", "remove line":"Zeile entfernen",
   "Ordered":"Bestellt", "Amount":"Menge", "per kg":"pro kg",
   "order lines":"Bestellzeilen", "order line":"Bestellzeile",
@@ -2173,7 +2179,8 @@ function draftRow(l){
     `<input data-k="color_name" list="dlColour" placeholder="${t("colour")}" value="${esc(l.color_name ?? "")}">` +
     f("spools", "1", "num", l.spools) +
     f("grams_each", "1000", "num", l.grams_each) +
-    f("total_price", "price", "num", l.total_price) +
+    f("total_price", "paid", "num", l.total_price) +
+    f("list_price", "list", "num", l.list_price) +
     f("order_ref", "order no.", "", l.order_ref ?? draftMeta.order_ref) +
     `<button class="draft-x" type="button" title="${t("remove line")}">✕</button>`;
   d.querySelector(".draft-x").addEventListener("click", ()=>{
@@ -2189,7 +2196,9 @@ function draftBox(){
     `<div class="draft">
        <div class="draft-row draft-head"><span>${t("Ordered")}</span><span>${t("Product")}</span>
          <span>${t("Colour")}</span><span>${t("Spools")}</span><span>${t("g each")}</span>
-         <span>${t("Price")}</span><span>${t("Order")}</span><span></span></div>
+         <span title="${t("what the line actually cost")}">${t("Paid")}</span>
+         <span title="${t("undiscounted price of one spool — prints are costed at this")}">${t("List")}</span>
+         <span>${t("Order")}</span><span></span></div>
        <div class="rows"></div>
        <div class="buy-actions">
          <button class="wbtn" id="buySave">${t("Save")}</button>
@@ -2383,8 +2392,13 @@ function purchaseRow(p, cur, unmatched){
             : `<div class="fn-sub" title="${t("matched by")} ${esc(p.matched_by)}">→ ${esc(p.matched_name)}</div>`}</td>
         <td class="num">${p.spools||1}×</td>
         <td class="num">${kgF(g)}</td>
-        <td class="num">${money(p.total_price, p.currency||cur)}</td>
-        <td class="num">${p.total_price ? money(p.total_price/(g/1000), p.currency||cur) : "—"}</td>
+        <td class="num">${money(p.total_price, p.currency||cur)}${
+          p.list_price && p.total_price && p.list_price*(p.spools||1) > p.total_price
+            ? `<div class="fn-sub" title="${t("list price before discount")}">${
+                t("list")} ${money(p.list_price*(p.spools||1), p.currency||cur)}</div>` : ""}</td>
+        <td class="num">${p.total_price ? money(p.total_price/(g/1000), p.currency||cur) : "—"}${
+          p.list_price ? `<div class="fn-sub" title="${t("this is what prints are costed at")}">${
+            t("list")} ${money(p.list_price/((p.grams_each||1000)/1000), p.currency||cur)}</div>` : ""}</td>
         <td style="color:var(--text-3)">${esc(p.order_ref)||"—"}</td>
         <td class="del"><button class="del-btn" type="button" data-pid="${p.id}"
             title="${t("delete this line")}" aria-label="${t("delete this line")}">✕</button></td>
