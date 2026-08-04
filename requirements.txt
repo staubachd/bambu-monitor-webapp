@@ -3,3 +3,6 @@ flask>=3.0
 PyMySQL>=1.1
 # smart-plug power monitoring (Tapo P110/P110M) - prebuilt aarch64 cp39 wheel exists
 tapo>=0.8.7
+# OPTIONAL: read invoice PDFs on the Filament page. Pure Python, so it installs
+# on the NAS without a compiler. Leave it out and the paste box still works.
+pypdf>=4.0

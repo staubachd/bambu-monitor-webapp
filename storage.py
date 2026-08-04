@@ -32,14 +32,19 @@ LATE_COLUMNS = {
                "filament_g": "FLOAT", "filament_g_manual": "FLOAT",
                "filament_detail": "TEXT", "filament_cost": "FLOAT",
                "ams_bambu": "TEXT", "error_code": "VARCHAR(64)",
-               "design_id": "VARCHAR(32)", "profile_id": "VARCHAR(32)"},
+               "design_id": "VARCHAR(32)", "profile_id": "VARCHAR(32)",
+               "pgroup": "VARCHAR(120)"},
+    # `code` arrived with invoice import, one release after the table itself.
+    # CREATE TABLE IF NOT EXISTS silently does nothing to an existing table, so
+    # every column added later has to be listed here or the INSERT breaks.
+    "purchases": {"code": "VARCHAR(24)"},
 }
 
 PRINT_COLS = ["job_id", "name", "started_at", "ended_at", "final_state",
               "total_layers", "energy_wh", "cost", "peak_w", "label",
               "design_title", "filament_g", "filament_g_manual",
               "filament_detail", "filament_cost", "ams_bambu", "error_code",
-              "design_id", "profile_id"]
+              "design_id", "profile_id", "pgroup"]
 
 # Never touched by upsert_print's UPDATE branch (which runs from the MQTT loop):
 #   started_at        - so a restart mid-print can't rewrite when the job began
@@ -47,9 +52,25 @@ PRINT_COLS = ["job_id", "name", "started_at", "ended_at", "final_state",
 #   filament_g_manual - user-supplied override
 #   design_title / filament_* - owned by the cloud updater; the MQTT path knows
 #                       nothing about them and would otherwise null them out
+#   pgroup            - user-assigned group, same reasoning as label
 PRINT_IMMUTABLE = {"job_id", "started_at", "label", "design_title",
                    "filament_g", "filament_g_manual", "filament_detail",
-                   "filament_cost", "ams_bambu", "error_code"}
+                   "filament_cost", "ams_bambu", "error_code", "pgroup"}
+
+# Identity of every filament ever seen in the AMS, so the Filament page can name
+# a spool long after it has been used up and removed. Usage figures are NOT here:
+# those are aggregated from prints.filament_detail, which already has them for
+# every past print (see app._filament_stats).
+FILAMENT_COLS = ["fkey", "filament_id", "code", "product", "color", "color_name",
+                 "type", "is_bambu", "first_seen", "last_seen"]
+
+# What was bought, as opposed to what was used. Kept as one row per order LINE
+# (not per spool) so an order of 3 spools stays one editable, deletable entry.
+# `fkey` links to a filament identity when it is known; when it is not, the free
+# text product/colour still identifies the line on screen.
+PURCHASE_COLS = ["fkey", "code", "product", "color_name", "color", "type",
+                 "spools", "grams_each", "total_price", "currency", "ordered_at",
+                 "order_ref", "note", "created_at"]
 
 
 def _row_from_state(s: dict) -> dict:
@@ -138,6 +159,25 @@ class Storage:
                 ts VARCHAR(20) NOT NULL,
                 acked_at DOUBLE,
                 PRIMARY KEY (code, ts)
+            )""")
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS filaments (
+                fkey VARCHAR(64) PRIMARY KEY,
+                filament_id VARCHAR(16), code VARCHAR(24),
+                product VARCHAR(64), color VARCHAR(8), color_name VARCHAR(64),
+                type VARCHAR(24), is_bambu INT,
+                first_seen DOUBLE, last_seen DOUBLE
+            )""")
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS purchases (
+                id INTEGER PRIMARY KEY {self._auto},
+                fkey VARCHAR(64), code VARCHAR(24),
+                product VARCHAR(64), color_name VARCHAR(64),
+                color VARCHAR(8), type VARCHAR(24),
+                spools INT, grams_each FLOAT,
+                total_price FLOAT, currency VARCHAR(8),
+                ordered_at DOUBLE, order_ref VARCHAR(64),
+                note VARCHAR(255), created_at DOUBLE
             )""")
         # skey/svalue rather than key/value - 'key' is reserved in MySQL/MariaDB
         cur.execute(f"""
@@ -260,6 +300,27 @@ class Storage:
             cur.close(); conn.close()
         return n > 0
 
+    def set_print_group(self, job_ids: list, name: str | None) -> int:
+        """Put prints into a named group, or out of one when name is empty.
+
+        The group is just a name stored on each print - no second table and no
+        ids to keep in step. Renaming is therefore 'set the new name on the same
+        prints', and a group stops existing when its last member leaves.
+        """
+        job_ids = [str(j) for j in (job_ids or []) if j]
+        if not job_ids:
+            return 0
+        marks = ",".join([self.ph] * len(job_ids))
+        conn, cur = self._cursor()
+        cur.execute(f"UPDATE prints SET pgroup={self.ph} WHERE job_id IN ({marks})",
+                    [name or None] + job_ids)
+        n = cur.rowcount
+        if self.backend == "sqlite":
+            conn.commit()
+        else:
+            cur.close(); conn.close()
+        return n
+
     def delete_print(self, job_id: str) -> bool:
         """Drop one print from the history for good. Telemetry samples are left
         alone: that table is a plain time series, not owned by any single job."""
@@ -298,6 +359,99 @@ class Storage:
             out = [dict(zip(PRINT_COLS, r)) for r in rows]
         return out
 
+    # ---- filament identities seen in the AMS ----
+    def upsert_filament(self, fkey: str, **fields) -> None:
+        """Record/refresh one filament identity.
+
+        first_seen is stamped once and never rewritten. On update only fields
+        that actually carry a value are written, so a later observation with an
+        unread RFID tag (product/code blank) cannot erase what an earlier, better
+        read already established.
+        """
+        fields = {k: v for k, v in fields.items()
+                  if k in FILAMENT_COLS and k not in ("fkey", "first_seen")}
+        now = time.time()
+        conn, cur = self._cursor()
+        cur.execute(f"SELECT fkey FROM filaments WHERE fkey={self.ph}", (fkey,))
+        if cur.fetchone():
+            sets = {k: v for k, v in fields.items() if v is not None}
+            sets["last_seen"] = now
+            clause = ", ".join(f"{k}={self.ph}" for k in sets)
+            cur.execute(f"UPDATE filaments SET {clause} WHERE fkey={self.ph}",
+                        list(sets.values()) + [fkey])
+        else:
+            row = {**{c: None for c in FILAMENT_COLS}, **fields,
+                   "fkey": fkey, "first_seen": now, "last_seen": now}
+            ph = ",".join([self.ph] * len(FILAMENT_COLS))
+            cur.execute(f"INSERT INTO filaments ({','.join(FILAMENT_COLS)}) VALUES ({ph})",
+                        [row[c] for c in FILAMENT_COLS])
+        if self.backend == "sqlite":
+            conn.commit()
+        else:
+            cur.close(); conn.close()
+
+    def set_filament_color(self, fkey: str, color_name: str) -> bool:
+        """Rename one identity's colour. Used when an invoice teaches the real
+        name - Bambu's own wording outranks the built-in guess table and anything
+        observed earlier. Callers match the code themselves, because codes have
+        to be compared in canonical form (see filament_catalog.norm_code)."""
+        conn, cur = self._cursor()
+        cur.execute(f"UPDATE filaments SET color_name={self.ph} WHERE fkey={self.ph}",
+                    (color_name, fkey))
+        n = cur.rowcount
+        if self.backend == "sqlite":
+            conn.commit()
+        else:
+            cur.close(); conn.close()
+        return n > 0
+
+    def all_filaments(self) -> list[dict]:
+        conn, cur = self._cursor()
+        cur.execute(f"SELECT {','.join(FILAMENT_COLS)} FROM filaments")
+        rows = cur.fetchall()
+        if self.backend == "sqlite":
+            return [dict(r) for r in rows]
+        cur.close(); conn.close()
+        return [dict(zip(FILAMENT_COLS, r)) for r in rows]
+
+    # ---- filament purchases ----
+    def add_purchase(self, **row) -> int:
+        """Insert one order line. Returns its new id."""
+        row = {**{c: None for c in PURCHASE_COLS}, **{k: v for k, v in row.items()
+                                                      if k in PURCHASE_COLS}}
+        row["created_at"] = time.time()
+        ph = ",".join([self.ph] * len(PURCHASE_COLS))
+        conn, cur = self._cursor()
+        cur.execute(f"INSERT INTO purchases ({','.join(PURCHASE_COLS)}) VALUES ({ph})",
+                    [row[c] for c in PURCHASE_COLS])
+        pid = cur.lastrowid
+        if self.backend == "sqlite":
+            conn.commit()
+        else:
+            cur.close(); conn.close()
+        return int(pid or 0)
+
+    def all_purchases(self) -> list[dict]:
+        cols = ["id"] + PURCHASE_COLS
+        conn, cur = self._cursor()
+        cur.execute(f"SELECT {','.join(cols)} FROM purchases "
+                    "ORDER BY COALESCE(ordered_at, created_at) DESC")
+        rows = cur.fetchall()
+        if self.backend == "sqlite":
+            return [dict(r) for r in rows]
+        cur.close(); conn.close()
+        return [dict(zip(cols, r)) for r in rows]
+
+    def delete_purchase(self, pid: int) -> bool:
+        conn, cur = self._cursor()
+        cur.execute(f"DELETE FROM purchases WHERE id={self.ph}", (int(pid),))
+        n = cur.rowcount
+        if self.backend == "sqlite":
+            conn.commit()
+        else:
+            cur.close(); conn.close()
+        return n > 0
+
     # ---- key/value settings (survive restarts) ----
     def get_setting(self, key: str, default=None):
         conn, cur = self._cursor()
@@ -306,6 +460,16 @@ class Storage:
         if self.backend != "sqlite":
             cur.close(); conn.close()
         return row[0] if row else default
+
+    def settings_with_prefix(self, prefix: str) -> dict:
+        """All settings whose key starts with prefix, keyed without it."""
+        conn, cur = self._cursor()
+        cur.execute(f"SELECT skey, svalue FROM settings WHERE skey LIKE {self.ph}",
+                    (prefix + "%",))
+        rows = cur.fetchall()
+        if self.backend != "sqlite":
+            cur.close(); conn.close()
+        return {r[0][len(prefix):]: r[1] for r in rows}
 
     def set_setting(self, key: str, value) -> None:
         conn, cur = self._cursor()

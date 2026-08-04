@@ -164,6 +164,21 @@
   .seg button.on{background:var(--surface); color:var(--text); box-shadow:var(--shadow)}
   .recdot{width:8px; height:8px; border-radius:50%; background:var(--text-3); flex:none; transition:background .2s}
   .recdot.live{background:var(--good)}
+  /* Narrow screens: the nav takes a full row of its own instead of being squeezed
+     between the brand and the chips, and the two purely informational bits
+     (serial/firmware, last-update stamp) step aside - both are on the Machine tab. */
+  @media(max-width:1150px){
+    header{gap:11px; margin-bottom:18px}
+    .tabs{order:10; width:100%; margin-left:0; justify-content:center}
+    .brand .sub{display:none}
+  }
+  @media(max-width:560px){
+    .upd{display:none}
+    .tabs{gap:4px; padding:4px}
+    .tabs button{padding:6px 11px; font-size:12px}
+    .logo{width:38px; height:38px; font-size:19px; border-radius:11px}
+    .brand h1{font-size:17px}
+  }
   .icon-btn{
     width:38px; height:38px; border-radius:11px; border:1px solid var(--border);
     background:var(--surface); color:var(--text-2); cursor:pointer; font-size:16px;
@@ -289,8 +304,16 @@
   .spool-type{font-weight:640; font-size:14px}
   .spool-brand{font-size:11.5px; color:var(--text-3); margin-top:1px}
   .spool-left{font-size:11.5px; color:var(--text-2); margin-top:3px; font-variant-numeric:tabular-nums}
-  .tag{display:inline-block; margin-top:6px; font-size:9.5px; font-weight:700; letter-spacing:.05em;
+  .tag{display:inline-block; font-size:9.5px; font-weight:700; letter-spacing:.05em;
     text-transform:uppercase; color:var(--accent); background:var(--accent-soft); padding:2px 7px; border-radius:5px}
+  /* nearly-used spool: flag it and offer the reorder link right there */
+  .spool.low{border-color:var(--warn)}
+  .tag-low{color:var(--warn); background:rgba(217,119,6,.14)}
+  .tag-new{color:var(--good); background:rgba(16,185,129,.14)}
+  .spool-tags{display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:6px}
+  .spool-tags:empty{display:none}
+  .reorder{font-size:11px; font-weight:650; color:var(--accent); text-decoration:none; white-space:nowrap}
+  .reorder:hover{text-decoration:underline}
 
   /* ---------- warnings ---------- */
   .warns{display:flex; flex-direction:column; gap:9px}
@@ -375,6 +398,19 @@
   .htab tr:hover .del-btn, .htab .del-btn:focus-visible{opacity:1}
   .htab .del-btn:hover{color:var(--danger); background:rgba(239,68,68,.12)}
   @media(hover:none){ .htab .del-btn{opacity:.6} }
+  /* manual grouping: selection column, action bar, grouped rows */
+  .htab .sel{width:1%; padding-right:8px}
+  .htab .sel input{width:15px; height:15px; accent-color:var(--accent); cursor:pointer;
+    display:block}
+  .htab tr.picked td{background:var(--accent-soft)}
+  .htab tr.in-grp td:first-child{border-left:2px solid var(--accent)}
+  .selbar{display:none; align-items:center; gap:9px; flex-wrap:wrap; margin-bottom:12px;
+    padding:9px 13px; border-radius:11px; background:var(--accent-soft);
+    border:1px solid var(--accent); font-size:12.5px; font-weight:600}
+  .selbar.on{display:flex}
+  .gbtn{border:0; background:none; cursor:pointer; color:var(--text-3); font-size:12px;
+    padding:2px 5px; border-radius:5px; line-height:1}
+  .gbtn:hover{color:var(--accent); background:var(--surface)}
   /* the deleted row slides away before the table reloads, so the change is seen */
   .htab tr.gone{opacity:0; transform:translateX(18px); transition:opacity .22s ease, transform .22s ease}
   .htab tr.gone td{background:rgba(239,68,68,.10)}
@@ -393,6 +429,67 @@
   @media(prefers-reduced-motion:reduce){
     .toast, .htab tr.gone{transition-duration:.01ms}
   }
+
+  /* ---------- filament page ---------- */
+  .htab .fname{display:flex; align-items:center; gap:10px; max-width:300px}
+  /* ring, not a filled dot: white filament has to stay visible on a light card */
+  .swatch{flex:none; width:20px; height:20px; border-radius:50%; background:var(--sw,#888);
+    box-shadow:inset 0 0 0 1px rgba(127,127,127,.45)}
+  .fname .fn-txt{display:flex; flex-direction:column; min-width:0}
+  .fname .fn-txt b{font-weight:640; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .fname .fn-sub{font-size:11.5px; color:var(--text-3); overflow:hidden;
+    text-overflow:ellipsis; white-space:nowrap}
+  #buyHead{flex-wrap:wrap; row-gap:8px; align-items:center}
+  /* a second block inside one card, set off from what it follows */
+  .sub-sec{margin-top:20px; padding-top:16px; border-top:1px solid var(--border)}
+  .sub-head{font-size:12px; font-weight:650; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--text-3); margin-bottom:12px}
+  .dropzone{display:flex; align-items:center; justify-content:center; gap:11px;
+    padding:20px; margin-bottom:10px; border-radius:13px; cursor:pointer;
+    border:2px dashed var(--border-strong); background:var(--surface-2);
+    color:var(--text-2); font-size:13px; font-weight:550; text-align:center;
+    transition:border-color .15s ease, background .15s ease, color .15s ease}
+  .dropzone:hover{border-color:var(--accent); color:var(--text)}
+  .dropzone.over{border-color:var(--accent); background:var(--accent-soft); color:var(--text)}
+  .dropzone .dz-ic{font-size:20px; line-height:1}
+  .buy-paste{width:100%; font:inherit; font-size:12.5px; line-height:1.5; resize:vertical;
+    padding:10px 12px; border-radius:11px; border:1px solid var(--border-strong);
+    background:var(--surface-2); color:var(--text); outline:none}
+  .buy-paste:focus{border-color:var(--accent)}
+  .buy-actions{display:flex; align-items:center; gap:9px; flex-wrap:wrap; margin:10px 0 4px}
+  /* draft lines are editable and unsaved - tinted so they can't be mistaken
+     for the stored list underneath */
+  .draft{border:1px dashed var(--accent); border-radius:12px; padding:11px;
+    margin:10px 0 4px; background:var(--accent-soft)}
+  .draft-row{display:grid; gap:8px; align-items:center; margin-bottom:8px;
+    grid-template-columns:132px minmax(110px,1.4fr) minmax(100px,1.2fr) 60px 74px 84px 92px 28px}
+  .draft-row:last-child{margin-bottom:0}
+  .draft input{font:inherit; font-size:12.5px; width:100%; padding:6px 8px; border-radius:8px;
+    border:1px solid var(--border-strong); background:var(--surface); color:var(--text);
+    outline:none; min-width:0}
+  .draft input[type=date]{color-scheme:light dark}
+  .draft input:focus{border-color:var(--accent)}
+  .draft input.num{text-align:right; font-variant-numeric:tabular-nums}
+  .draft-head{font-size:10.5px; text-transform:uppercase; letter-spacing:.06em;
+    color:var(--text-3); font-weight:650}
+  .draft-x{border:0; background:none; cursor:pointer; color:var(--text-3); font-size:14px;
+    padding:4px; border-radius:6px}
+  .draft-x:hover{color:var(--danger); background:rgba(239,68,68,.12)}
+  @media(max-width:760px){ .draft-row{grid-template-columns:1fr 1fr 1fr; } .draft-head{display:none} }
+  /* product-line group header inside the purchases table */
+  .htab tr.grp td{padding:9px 12px; background:var(--surface-2); cursor:pointer;
+    border-top:1px solid var(--border-strong)}
+  .htab tr.grp:hover td{background:var(--accent-soft)}
+  .grp-row{display:flex; align-items:baseline; gap:9px; flex-wrap:wrap}
+  .grp-caret{color:var(--text-3); font-size:11px; transition:transform .15s ease;
+    display:inline-block; width:11px}
+  tr.grp.closed .grp-caret{transform:rotate(-90deg)}
+  .grp-name{font-weight:680; font-size:13px}
+  .grp-sum{margin-left:auto; font-size:11.5px; color:var(--text-3); font-weight:550;
+    font-variant-numeric:tabular-nums}
+  .htab .shr{width:110px}
+  .htab .shr .mt{display:block; height:7px; border-radius:4px; background:var(--surface-2); overflow:hidden}
+  .htab .shr .mt>span{display:block; height:100%; background:var(--accent); border-radius:4px}
 
   /* ---------- statistics ---------- */
   .kpis{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:18px}
@@ -502,17 +599,16 @@
     <nav class="tabs" id="tabs">
       <button data-tab="overview" class="on" data-i18n="Overview">Overview</button>
       <button data-tab="machine" data-i18n="Machine">Machine</button>
-      <button data-tab="history" data-i18n="Print history">Print history</button>
+      <button data-tab="history" data-i18n="History">History</button>
       <button data-tab="stats" data-i18n="Statistics">Statistics</button>
+      <button data-tab="filament" data-i18n="Filament">Filament</button>
       <button data-tab="maintenance" data-i18n="Maintenance">Maintenance</button>
-      <button data-tab="live" id="liveTabBtn" data-i18n="Live view" style="display:none">Live view</button>
+      <button data-tab="live" id="liveTabBtn" data-i18n="Live" style="display:none">Live</button>
     </nav>
     <div class="hgap"></div>
     <span class="pill"><span class="dot" id="conn"></span><span id="connText">connecting…</span><span class="upd" id="lastUpd"></span></span>
-    <span class="pill" id="wifiChip">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12.55a11 11 0 0 1 14 0"/><path d="M8.5 16.1a6 6 0 0 1 7 0"/><path d="M12 19.5h.01"/></svg>
-      <span id="wifi">—</span>
-    </span>
+    <!-- Wi-Fi strength lives on the Machine tab: static-ish detail, not worth a
+         permanent slot in a header that has to survive a phone screen -->
     <span class="pill recwrap" id="recWrap" title="Auto = record only while printing (stream stays connected). On = always record. Off = stop recording AND disconnect the printer stream so the app is fully idle.">
       <span class="recdot" id="recDot"></span>
       <span class="seg" id="recSeg">
@@ -726,6 +822,12 @@
         <h3 data-i18n="Print history">Print history</h3><span class="meta" id="histMeta"></span>
         <button class="wbtn" id="histBtn" data-i18n="Refresh" style="margin-left:auto">Refresh</button>
       </div>
+      <div class="selbar" id="histSelBar">
+        <span id="histSelCount"></span>
+        <button class="wbtn" id="histGroupBtn" data-i18n="Group…">Group…</button>
+        <button class="wbtn" id="histUngroupBtn" data-i18n="Ungroup">Ungroup</button>
+        <button class="wbtn" id="histSelClear" data-i18n="Clear selection">Clear selection</button>
+      </div>
       <div style="overflow-x:auto">
         <table class="htab" id="histTable"><tbody></tbody></table>
       </div>
@@ -747,6 +849,62 @@
       <div class="tmodels" id="statModels"></div>
     </section>
   </div><!-- /tab-stats -->
+
+  <!-- ============ TAB: filament ============ -->
+  <div class="dash tab-panel" id="tab-filament">
+    <section class="card span-12">
+      <div class="card-head">
+        <h3 data-i18n="Filament">Filament</h3>
+        <span class="meta" data-i18n="every filament ever used">every filament ever used</span>
+      </div>
+      <div class="kpis" id="filKpis"></div>
+    </section>
+    <section class="card span-12">
+      <div class="card-head">
+        <h3 data-i18n="Consumption">Consumption</h3><span class="meta" id="filMeta"></span>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="htab" id="filTable"><tbody></tbody></table>
+      </div>
+      <div class="mnt-note" data-i18n="Usage is summed from the per-slot detail of every recorded print. Names come from the AMS RFID tag, so spools used before this page existed show their material and colour only.">Usage is summed from the per-slot detail of every recorded print. Names come from the AMS RFID tag, so spools used before this page existed show their material and colour only.</div>
+    </section>
+
+    <section class="card span-12">
+      <div class="card-head" id="buyHead">
+        <h3 data-i18n="Purchases">Purchases</h3><span class="meta" id="buyMeta"></span>
+        <span class="meta" style="margin-left:auto" data-i18n="group by">group by</span>
+        <span class="seg" id="buyGroupSeg">
+          <button data-g="product" data-i18n="Product">Product</button>
+          <button data-g="type" data-i18n="Material">Material</button>
+          <button data-g="colour" data-i18n="Colour">Colour</button>
+          <button data-g="order" data-i18n="Order">Order</button>
+          <button data-g="none" data-i18n="Flat">Flat</button>
+        </span>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="htab" id="buyTable"><tbody></tbody></table>
+      </div>
+      <!-- import sits BELOW the list: the history is what you come here to read,
+           the importer is what you occasionally come here to use -->
+      <div class="sub-sec">
+        <div class="sub-head" data-i18n="Add an order">Add an order</div>
+        <label class="dropzone" id="buyDrop">
+          <input type="file" id="buyFile" accept="application/pdf,.pdf,.txt" hidden>
+          <span class="dz-ic">📄</span>
+          <span data-i18n="Drop the invoice PDF here, or click to choose one">Drop the invoice PDF here, or click to choose one</span>
+        </label>
+        <textarea id="buyPaste" class="buy-paste" rows="2"
+          data-i18n-ph="…or paste an order confirmation as text."></textarea>
+        <div class="buy-actions">
+          <button class="wbtn" id="buyParse" data-i18n="Read pasted text">Read pasted text</button>
+          <button class="wbtn" id="buyAddRow" data-i18n="+ Add line by hand">+ Add line by hand</button>
+          <span class="meta" id="buyHint"></span>
+        </div>
+        <div id="buyDraft"></div>
+        <div class="mnt-note" data-i18n="Nothing is saved until you press Save. Reading an order is best-effort — check every line, especially price and quantity.">Nothing is saved until you press Save. Reading an order is best-effort — check every line, especially price and quantity.</div>
+      </div>
+    </section>
+  </div><!-- /tab-filament -->
 
   <!-- ============ TAB: maintenance ============ -->
   <div class="dash tab-panel" id="tab-maintenance">
@@ -809,6 +967,8 @@ const DE = {
   // navigation / header
   "Overview":"Overview", "Machine":"Drucker", "Print history":"Druckverlauf",
   "Live view":"Live-Ansicht", "printer camera":"Druckerkamera",
+  // short forms - the nav has to fit on a phone; the cards keep the long names
+  "History":"Verlauf", "Live":"Live", "Wi-Fi signal":"WLAN-Signal",
   "Live":"Live", "Offline":"Offline", "Stream off":"Stream aus",
   "connecting…":"Verbinde…", "reconnecting…":"Reconnecting...",
   "Toggle theme":"Design wechseln",
@@ -846,6 +1006,59 @@ const DE = {
   "reading RFID":"RFID wird gelesen", "switching slot":"switching slot",
   "external spool":"externe Spule", "no RFID data":"keine RFID-Daten",
   "Loaded":"Geladen", "Empty":"Leer", "left":"übrig", "min":"Min",
+  "Low":"Wenig", "Reorder":"Nachbestellen",
+  "search the Bambu store":"im Bambu-Store suchen",
+  // filament page
+  "Filament":"Filament", "Consumption":"Verbrauch", "Type":"Typ", "Used":"Verbraucht",
+  "Share":"Anteil", "Cost":"Kosten", "Prints":"Drucke", "Last used":"Zuletzt benutzt",
+  "Status":"Status", "Slot":"Fach", "external":"extern", "third-party":"Fremdhersteller",
+  "Different filaments":"Verschiedene Filamente", "Prints with data":"Drucke mit Daten",
+  "filaments":"Filamente", "in the AMS":"im AMS",
+  "Bought":"Gekauft", "Left":"Übrig", "Spent":"Ausgegeben",
+  "actually paid":"tatsächlich bezahlt",
+  "more used than bought — older orders are missing from the log":
+    "mehr verbraucht als gekauft – ältere Bestellungen fehlen im Protokoll",
+  // purchases
+  "Purchases":"Käufe", "Add an order":"Bestellung hinzufügen",
+  "Read pasted text":"Text einlesen",
+  "+ Add line by hand":"+ Zeile manuell hinzufügen",
+  "Drop the invoice PDF here, or click to choose one":
+    "Rechnungs-PDF hierher ziehen oder klicken zum Auswählen",
+  "…or paste an order confirmation as text.":
+    "…oder eine Bestellbestätigung als Text einfügen.",
+  "reading…":"lese…", "read from the invoice layout":"aus dem Rechnungslayout gelesen",
+  "no filament lines found":"keine Filamentzeilen gefunden",
+  "colour code":"Farbcode",
+  "Nothing is saved until you press Save. Reading an order is best-effort — check every line, especially price and quantity.":
+    "Nichts wird gespeichert, bis du auf Speichern klickst. Das Einlesen ist eine Schätzung – prüfe jede Zeile, besonders Preis und Menge.",
+  "Product":"Produkt", "Colour":"Farbe", "colour":"Farbe", "Spools":"Spulen",
+  "g each":"g je", "Price":"Preis", "Order":"Bestellung", "order no.":"Bestellnr.",
+  "Save":"Speichern", "Cancel":"Abbrechen", "remove line":"Zeile entfernen",
+  "Ordered":"Bestellt", "Amount":"Menge", "per kg":"pro kg",
+  "order lines":"Bestellzeilen", "order line":"Bestellzeile",
+  "lines found — check them":"Zeilen gefunden – bitte prüfen",
+  "No purchases logged yet.":"Noch keine Käufe erfasst.",
+  "not matched to a filament":"keinem Filament zugeordnet",
+  "no filament in the AMS or the print history matches this line yet":
+    "noch kein Filament im AMS oder Druckverlauf passt zu dieser Zeile",
+  "ambiguous — colour unclear":"mehrdeutig – Farbe unklar",
+  "several colours of this product are on record — set the colour name to match one of them":
+    "von diesem Produkt sind mehrere Farben bekannt – Farbnamen passend setzen",
+  "matched by":"zugeordnet über", "unused":"unbenutzt", "Other":"Sonstige",
+  "group by":"gruppieren nach", "Material":"Material", "Flat":"Ohne",
+  "no order number":"ohne Bestellnummer",
+  "bought, not printed with yet":"gekauft, noch nicht verdruckt",
+  "delete this line":"diese Zeile löschen", "Purchase deleted":"Kauf gelöscht",
+  "Could not delete this line.":"Die Zeile konnte nicht gelöscht werden.",
+  "Could not save the purchase.":"Der Kauf konnte nicht gespeichert werden.",
+  "Could not read that order.":"Die Bestellung konnte nicht gelesen werden.",
+  "Paste an order first.":"Bitte zuerst eine Bestellung einfügen.",
+  "Nothing to save.":"Nichts zu speichern.", "saved":"gespeichert",
+  "every filament ever used":"jedes jemals benutzte Filament",
+  "Nothing recorded yet — filament appears here once a print with slot data finishes.":
+    "Noch nichts aufgezeichnet – Filament erscheint hier, sobald ein Druck mit Slot-Daten fertig ist.",
+  "Usage is summed from the per-slot detail of every recorded print. Names come from the AMS RFID tag, so spools used before this page existed show their material and colour only.":
+    "Der Verbrauch wird aus den Slot-Details aller aufgezeichneten Drucke summiert. Namen stammen vom RFID-Tag im AMS – Spulen, die vor dieser Seite verbraucht wurden, zeigen nur Material und Farbe.",
   // cost
   "Cost":"Kosten", "Power":"Strom", "Material":"Material",
   "Today":"Heute", "This week":"Diese Woche", "This month":"Dieser Monat",
@@ -901,6 +1114,16 @@ const DE = {
   "click to rename":"zum Umbenennen klicken", "slicer profile":"Slicer-Profil",
   "click to override grams":"Gramm manuell überschreiben",
   "custom name":"eigener Name", "grams":"Gramm",
+  // manual grouping of prints
+  "Group…":"Gruppieren…", "Ungroup":"Gruppierung aufheben",
+  "Clear selection":"Auswahl aufheben", "select this print":"diesen Druck auswählen",
+  "print selected":"Druck ausgewählt", "prints selected":"Drucke ausgewählt",
+  "Name for this group:":"Name für diese Gruppe:",
+  "A group needs a name.":"Eine Gruppe braucht einen Namen.",
+  "Grouped as":"Gruppiert als", "Ungrouped":"Gruppierung aufgehoben",
+  "Group renamed":"Gruppe umbenannt", "rename group":"Gruppe umbenennen",
+  "Could not change the group.":"Die Gruppe konnte nicht geändert werden.",
+  "print":"Druck",
   "delete this print":"diesen Druck löschen",
   "Delete this print from the history? This cannot be undone.":
     "Diesen Druck aus dem Verlauf löschen? Kann nicht rückgängig gemacht werden.",
@@ -927,6 +1150,9 @@ function applyStatic(){
   });
   document.querySelectorAll("[data-i18n-title]").forEach(el=>{
     el.title = t(el.dataset.i18nTitle);
+  });
+  document.querySelectorAll("[data-i18n-ph]").forEach(el=>{
+    el.placeholder = t(el.dataset.i18nPh);
   });
   document.documentElement.lang = LANG;
   document.querySelectorAll("#langSeg button").forEach(b=>
@@ -1039,7 +1265,6 @@ function render(s){
     $("connText").textContent = t(s.connected ? "Live" : "Offline");
   }
   $("serial").textContent = (p.serial ? "SN "+p.serial : "") + (p.firmware ? " · fw "+p.firmware : "");
-  $("wifi").textContent = p.wifi_dbm!=null ? p.wifi_dbm+" dBm" : "—";
 
   // chamber LED toggle - reflect real state; only usable while connected
   const ledOn = (s.lights && s.lights.chamber_light) === "on";
@@ -1156,6 +1381,8 @@ function render(s){
     `<div class="row"><span class="k">${t("Chamber light")}</span><span class="v">${t((s.lights||{}).chamber_light ?? "–")}</span></div>` +
     `<div class="row"><span class="k">${t("Speed mode")}</span><span class="v">${t((s.speed||{}).level ?? "–")}</span></div>` +
     `<div class="row"><span class="k">${t("Connection")}</span><span class="v">${p.print_type ?? "–"}</span></div>` +
+    `<div class="row"><span class="k">${t("Wi-Fi signal")}</span><span class="v">${
+       p.wifi_dbm!=null ? p.wifi_dbm+" dBm" : "–"}</span></div>` +
     `<div class="row"><span class="k">${t("Firmware")}</span><span class="v">${p.firmware ?? "–"}</span></div>` +
     `<div class="row"><span class="k">${t("Update")}</span><span class="v ${mach.firmware_update?'ok':'no'}">${
        mach.firmware_update ? mach.firmware_update+" "+t("available") : t("up to date")}</span></div>` +
@@ -1251,14 +1478,25 @@ function render(s){
       const left = [tr.grams_left!=null ? tr.grams_left+" g" : null,
                     tr.metres_left!=null ? tr.metres_left+" m" : null]
                    .filter(Boolean).join(" · ");
-      return `<div class="spool ${active===tr.id?'active':''}">
+      // identity line: product line + the colour's name, falling back to its
+      // raw code when the catalogue doesn't know it (never a guessed name)
+      const ident = [tr.brand, tr.color_name || (tr.is_bambu ? tr.code : null)]
+                    .filter(Boolean).map(esc).join(" · ");
+      // only genuine RFID spools get a store link - a third-party spool reports
+      // a Bambu SKU whenever it was sliced with a Bambu profile
+      const reorder = tr.store_url
+        ? `<a class="reorder" href="${esc(tr.store_url)}" target="_blank" rel="noopener noreferrer"
+             title="${t("search the Bambu store")}">${t("Reorder")} ↗</a>` : "";
+      return `<div class="spool ${active===tr.id?'active':''} ${tr.low?'low':''}">
         <div class="donut" style="--fc:${fc};--pct:${pctv}"><div class="donut-hole">${center}</div></div>
         <div>
           <div class="spool-type"><span class="slot-badge">${
-            tr._ext ? 'EXT' : ((tr.id ?? 0) + 1)}</span>${tr.type||t('Empty')}</div>
-          <div class="spool-brand">${tr._ext ? t('external spool') : (tr.brand || t('no RFID data'))}</div>
+            tr._ext ? 'EXT' : ((tr.id ?? 0) + 1)}</span>${esc(tr.type)||t('Empty')}</div>
+          <div class="spool-brand">${tr._ext ? t('external spool') : (ident || t('no RFID data'))}</div>
           ${left ? `<div class="spool-left">${left} ${t("left")}</div>` : ""}
-          ${active===tr.id && !tr._ext ?`<span class="tag">${t("Loaded")}</span>`:''}
+          <div class="spool-tags">${
+            active===tr.id && !tr._ext ? `<span class="tag">${t("Loaded")}</span>` : ''}${
+            tr.low ? `<span class="tag tag-low">${t("Low")}</span>` : ''}${reorder}</div>
         </div>
       </div>`;
     }).join("");
@@ -1459,6 +1697,7 @@ function esc(v){
     .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
 }
 let histEditing = false;   // don't let the 60s refresh clobber an open editor
+let lastPrints = [];       // last payload, so a group header can list its members
 let lastTask = null, lastJobState = null;   // drives instant history refresh
 
 function startEdit(cell){
@@ -1542,9 +1781,32 @@ async function deletePrint(job, name, row){
   toast(t("Print deleted") + (name ? ": " + name : ""));
   loadPrints();
 }
-$("histTable").addEventListener("click", e=>{
+$("histTable").addEventListener("click", async e=>{
   const del = e.target.closest("button.del-btn");
   if(del){ deletePrint(del.dataset.job, del.dataset.name, del.closest("tr")); return; }
+  const ren = e.target.closest("button.gbtn");
+  if(ren){
+    const old = ren.dataset.grp;
+    const name = prompt(t("Name for this group:"), old);
+    if(name === null) return;
+    // an emptied name dissolves the group rather than leaving it nameless
+    const jobs = (lastPrints||[]).filter(r=> r.pgroup === old).map(r=> r.job_id);
+    if(await postGroup(jobs, name.trim())){
+      histOpen.delete(old);
+      if(name.trim()) histOpen.add(name.trim());
+      toast(name.trim() ? t("Group renamed") : t("Ungrouped"));
+      loadPrints();
+    }
+    return;
+  }
+  const grp = e.target.closest("tr.grp");
+  if(grp){
+    const k = grp.dataset.grp;
+    histOpen.has(k) ? histOpen.delete(k) : histOpen.add(k);
+    loadPrints();
+    return;
+  }
+  if(e.target.closest("td.sel")) return;      // the checkbox owns that cell
   if(e.target.closest("a")) return;   // MakerWorld link: let it open, don't rename
   const nm = e.target.closest("td.nm");
   if(nm){ startEdit(nm); return; }
@@ -1590,22 +1852,75 @@ async function loadPrints(){
   try{ d = await (await fetch("/api/prints?limit=60")).json(); }
   catch(_){ return; }
   const rows = d.prints||[], cur = d.currency||"€";
+  lastPrints = rows;          // the group header needs every member's job_id
   const tb = $("histTable").querySelector("tbody");
   if(!rows.length){
     tb.innerHTML = `<tr><td style="color:var(--text-3);padding:10px 0">${t("No prints recorded yet — the first one appears here as soon as it starts.")}</td></tr>`;
-    $("histMeta").textContent=""; return;
+    $("histMeta").textContent=""; syncHistSel(); return;
   }
   let totWh=0, totCost=0;
   for(const r of rows){ totWh += r.energy_wh||0; totCost += (r.total_cost ?? r.cost) || 0; }
   $("histMeta").textContent =
     `${rows.length} ${t("prints")} · ${(totWh/1000).toFixed(2)} kWh · ${cur} ${ceil2(totCost).toFixed(2)} ${t("total")}`;
+  const items = groupPrints(rows);
   tb.innerHTML =
-    `<tr><th>${t("Started")}</th><th>${t("Job")}</th><th>${t("Result")}</th>
+    `<tr><th class="sel"></th><th>${t("Started")}</th><th>${t("Job")}</th><th>${t("Result")}</th>
          <th class="num">${t("Layers")}</th><th class="num">${t("Duration")}</th>
          <th class="num">${t("Energy")}</th><th class="num">${t("Power")}&nbsp;€</th>
          <th class="num">${t("Filament")}</th><th class="num">${t("Filament")}&nbsp;€</th>
          <th class="num">${t("Total")}</th><th class="del"></th></tr>` +
-    rows.map(r=>{
+    items.map(it=> it.group ? groupHead(it, cur) + (histOpen.has(it.group)
+                     ? it.rows.map(r=> printRow(r, cur)).join("") : "")
+                            : printRow(it.row, cur)).join("");
+  syncHistSel();
+}
+// One model is often several prints. Grouped rows fold under a named header that
+// sits at the position of its NEWEST member, so the history still reads
+// chronologically instead of pushing every group to the top.
+function groupPrints(rows){
+  const items = [], byGroup = new Map();
+  for(const r of rows){
+    if(r.pgroup){
+      if(!byGroup.has(r.pgroup)){
+        const g = {group: r.pgroup, rows: [], at: 0};
+        byGroup.set(r.pgroup, g); items.push(g);
+      }
+      const g = byGroup.get(r.pgroup);
+      g.rows.push(r);
+      g.at = Math.max(g.at, r.started_at || 0);
+    } else {
+      items.push({row: r, at: r.started_at || 0});
+    }
+  }
+  return items.sort((a,b)=> b.at - a.at);
+}
+// Grouped prints keep their own subtotals - the point of grouping a model is to
+// see what the model cost, not what one of its plates cost.
+function groupHead(g, cur){
+  let wh=0, cost=0, grams=0, secs=0, fails=0;
+  for(const r of g.rows){
+    wh += r.energy_wh||0;
+    cost += (r.total_cost ?? r.cost) || 0;
+    grams += (r.filament_g_manual != null ? r.filament_g_manual : r.filament_g) || 0;
+    if(r.started_at && r.ended_at) secs += r.ended_at - r.started_at;
+    if(r.final_state === "FAILED") fails++;
+  }
+  const shut = !histOpen.has(g.group);
+  const h = Math.floor(secs/3600), m = Math.round((secs%3600)/60);
+  return `<tr class="grp${shut?" closed":""}" data-grp="${esc(g.group)}">
+    <td colspan="12"><div class="grp-row">
+      <span class="grp-caret">▾</span>
+      <span class="grp-name">${esc(g.group)}</span>
+      <button class="gbtn" data-act="rename" data-grp="${esc(g.group)}"
+        title="${t("rename group")}">✎</button>
+      <span class="grp-sum">${g.rows.length} ${t(g.rows.length===1?"print":"prints")}${
+        fails ? ` · ${fails} ✗` : ""} · ${(h?h+"h ":"")+m+"m"} · ${
+        grams ? grams.toFixed(0)+" g · " : ""}${wh ? (wh/1000).toFixed(2)+" kWh · " : ""}${
+        cur} ${ceil2(cost).toFixed(2)}</span>
+    </div></td></tr>`;
+}
+function printRow(r, cur){
+    return [r].map(r=>{
       const grams = r.filament_g_manual != null ? r.filament_g_manual : r.filament_g;
       // the cloud's designTitle is the real model name; `name` is the slicer profile
       const auto = r.design_title || r.name || "";
@@ -1617,7 +1932,9 @@ async function loadPrints(){
       const d0 = r.started_at ? new Date(r.started_at*1000) : null;
       const when = d0 ? d0.toLocaleString([], {year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}) : "—";
       const running = !r.ended_at;
-      return `<tr>
+      return `<tr${r.pgroup ? ' class="in-grp"' : ""}>
+        <td class="sel"><input type="checkbox" data-job="${esc(r.job_id)}"
+            aria-label="${t("select this print")}"></td>
         <td style="color:var(--text-2);white-space:nowrap">${when}</td>
         <td class="nm" data-job="${r.job_id}" data-label="${esc(r.label)}" data-name="${esc(auto)}"
             title="${t("click to rename")}${r.name?" · "+t("slicer profile")+": "+esc(r.name):""}"><div class="nm-wrap"><span class="nm-txt">${
@@ -1643,6 +1960,72 @@ async function loadPrints(){
       </tr>`;
     }).join("");
 }
+
+/* ---------- history: selection & manual grouping ---------- */
+const histSel = new Set();   // job_ids ticked; survives the 60 s auto-refresh
+const histOpen = new Set();  // groups folded open, collapsed by default
+function syncHistSel(){
+  document.querySelectorAll('#histTable input[type=checkbox]').forEach(cb=>{
+    cb.checked = histSel.has(cb.dataset.job);
+    const tr = cb.closest("tr");
+    if(tr) tr.classList.toggle("picked", cb.checked);
+  });
+  // a job can vanish (deleted, or scrolled past the 60-row window)
+  const live = new Set([...document.querySelectorAll('#histTable input[type=checkbox]')]
+                       .map(cb=>cb.dataset.job));
+  [...histSel].forEach(j=>{ if(!live.has(j)) histSel.delete(j); });
+  const n = histSel.size;
+  $("histSelBar").classList.toggle("on", n > 0);
+  $("histSelCount").textContent = `${n} ${t(n===1?"print selected":"prints selected")}`;
+}
+async function postGroup(jobs, name){
+  let d = null;
+  try{
+    d = await (await fetch("/api/prints/group", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({job_ids: jobs, name})})).json();
+  }catch(_){}
+  if(!d || !d.ok){
+    toast(t("Could not change the group.") + (d && d.error ? " ("+d.error+")" : ""), true);
+    return false;
+  }
+  return true;
+}
+$("histGroupBtn").addEventListener("click", async ()=>{
+  if(!histSel.size) return;
+  // pre-fill with the group the selection already sits in, so this doubles as
+  // "add these to that group" and as a rename
+  const rows = [...document.querySelectorAll('#histTable tr.picked')];
+  const suggest = rows.map(tr=>{
+    const nm = tr.querySelector("td.nm");
+    return nm ? (nm.dataset.label || nm.dataset.name || "") : "";
+  }).find(Boolean) || "";
+  const name = prompt(t("Name for this group:"), suggest);
+  if(name === null) return;
+  if(!name.trim()){ toast(t("A group needs a name."), true); return; }
+  if(await postGroup([...histSel], name.trim())){
+    histOpen.add(name.trim());
+    histSel.clear();
+    toast(t("Grouped as") + " " + name.trim());
+    loadPrints();
+  }
+});
+$("histUngroupBtn").addEventListener("click", async ()=>{
+  if(!histSel.size) return;
+  if(await postGroup([...histSel], "")){
+    histSel.clear();
+    toast(t("Ungrouped"));
+    loadPrints();
+  }
+});
+$("histSelClear").addEventListener("click", ()=>{ histSel.clear(); syncHistSel(); });
+$("histTable").addEventListener("change", e=>{
+  const cb = e.target.closest('input[type=checkbox]');
+  if(!cb) return;
+  cb.checked ? histSel.add(cb.dataset.job) : histSel.delete(cb.dataset.job);
+  syncHistSel();
+});
+
 // Refresh also pulls filament data from the cloud, so a just-finished print
 // gets its grams immediately rather than on the next poll.
 $("histBtn").addEventListener("click", async ()=>{
@@ -1683,6 +2066,352 @@ async function loadStats(){
     `<span class="tc"><span class="cnt">${x.count}×</span> · ${kgF(x.filament_g)} · ${money(x.cost, cur)}</span></div>`).join("")
     : `<div class="temp-sub">—</div>`;
 }
+
+/* ---------- filament ---------- */
+// Name a filament as precisely as the data allows: product line + colour name
+// for an RFID spool, down to bare material + hex for one the AMS never saw.
+function filName(f){
+  const main = f.product || f.type || "—";
+  const sub  = f.color_name || f.code || ("#" + (f.color || "??????"));
+  return {main: esc(main), sub: esc(sub)};
+}
+function filStatus(f){
+  if(!f.loaded) return `<span style="color:var(--text-3)">—</span>`;
+  const where = f.external ? t("external") : t("Slot")+" "+f.slot;
+  // -1 means the spool has no tag, so remaining is unknown, not empty
+  const rem = (f.remain_pct!=null && f.remain_pct>=0)
+    ? ` · ${f.remain_pct}%` + (f.grams_left!=null ? ` (${f.grams_left} g)` : "") : "";
+  return `<span class="tag${f.low?' tag-low':''}">${where}</span>`
+       + `<span style="color:var(--text-2)">${rem}</span>`;
+}
+async function loadFilaments(){
+  let d;
+  try{ d = await (await fetch("/api/filaments")).json(); }catch(_){ return; }
+  const cur = d.currency||"€", tt = d.totals||{}, rows = d.filaments||[];
+  filKnown = rows.filter(f=> f.product || f.color_name);
+  $("filKpis").innerHTML = [
+    ["Used", kgF(tt.grams), money(tt.cost, cur)],
+    ["Bought", kgF(tt.bought_g), `${tt.orders||0} ${t("order lines")}`],
+    ["Spent", money(tt.spent, cur), ""],
+    ["Different filaments", tt.filaments ?? 0, tt.unused ? `${tt.unused} ${t("unused")}` : ""],
+    ["Prints with data", tt.prints ?? 0, ""],
+  ].map(([l,v,s])=>`<div class="kpi"><span class="kl">${t(l)}</span><span class="kv">${v}</span><span class="ks">${s}</span></div>`).join("");
+  renderPurchases(d);
+  const tb = $("filTable").querySelector("tbody");
+  if(!rows.length){
+    tb.innerHTML = `<tr><td style="color:var(--text-3);padding:10px 0">${t("Nothing recorded yet — filament appears here once a print with slot data finishes.")}</td></tr>`;
+    $("filMeta").textContent = ""; return;
+  }
+  const loaded = rows.filter(f=>f.loaded).length;
+  $("filMeta").textContent = `${rows.length} ${t("filaments")} · ${loaded} ${t("in the AMS")}`;
+  tb.innerHTML =
+    `<tr><th>${t("Filament")}</th><th>${t("Type")}</th>
+         <th class="num">${t("Used")}</th><th>${t("Share")}</th>
+         <th class="num">${t("Bought")}</th><th class="num">${t("Left")}</th>
+         <th class="num">${t("Cost")}</th><th class="num">${t("Prints")}</th>
+         <th>${t("Last used")}</th><th>${t("Status")}</th><th class="del"></th></tr>` +
+    rows.map(f=>{
+      const n = filName(f);
+      const last = f.last_used
+        ? new Date(f.last_used*1000).toLocaleDateString([], {year:"numeric",month:"2-digit",day:"2-digit"})
+        : "—";
+      return `<tr>
+        <td class="fname"><span class="swatch" style="--sw:#${esc(f.color||"888888")}"></span>
+          <span class="fn-txt"><b>${n.main}</b><span class="fn-sub">${n.sub}${
+            f.is_bambu===false ? " · "+t("third-party") : ""}</span></span></td>
+        <td style="color:var(--text-2)">${esc(f.type)||"—"}</td>
+        <td class="num">${f.grams ? kgF(f.grams) : "—"}</td>
+        <td class="shr"><span class="mt"><span style="width:${Math.round((f.share||0)*100)}%"></span></span></td>
+        <td class="num">${f.bought_g ? kgF(f.bought_g) : "—"}${
+          f.spools ? `<span class="fn-sub"> ${f.spools}×</span>` : ""}</td>
+        <td class="num"${f.left_g!=null && f.left_g<0 ? ' style="color:var(--warn)" title="'+t("more used than bought — older orders are missing from the log")+'"' : ""}>${
+          f.left_g!=null ? kgF(f.left_g) : "—"}</td>
+        <td class="num"${f.paid_per_kg ? ` title="${t("actually paid")}: ${cur} ${f.paid_per_kg}/kg"` : ""}>${money(f.cost, cur)}</td>
+        <td class="num">${f.prints||0}</td>
+        <td style="color:var(--text-2);white-space:nowrap">${last}</td>
+        <td style="white-space:nowrap">${f.unused
+          ? `<span class="tag tag-new" title="${t("bought, not printed with yet")}">${t("unused")}</span>`
+          : filStatus(f)}</td>
+        <td class="del">${f.store_url
+          ? `<a class="reorder" href="${esc(f.store_url)}" target="_blank" rel="noopener noreferrer"
+               title="${t("search the Bambu store")}">${t("Reorder")} ↗</a>` : ""}</td>
+      </tr>`;
+    }).join("");
+}
+
+/* ---------- purchases ----------
+   Draft lines live only in the DOM until Save: a half-read receipt should be
+   fixable in place, and nothing reaches the database unconfirmed. */
+let draftMeta = {order_ref:"", ordered_at:null, currency:null};
+// Purchases are matched to filaments by wording, so a typo means a line never
+// links up. Offering the names already on record makes that the easy path.
+let filKnown = [];
+function draftLists(){
+  const uniq = k => [...new Set(filKnown.map(f=>f[k]).filter(Boolean))].sort();
+  const opts = a => a.map(v=>`<option value="${esc(v)}">`).join("");
+  return `<datalist id="dlProduct">${opts(uniq("product"))}</datalist>`
+       + `<datalist id="dlColour">${opts(uniq("color_name"))}</datalist>`;
+}
+function draftRow(l){
+  l = l || {};
+  const d = document.createElement("div");
+  d.className = "draft-row";
+  // the invoice's colour code rides along invisibly: it is what links the
+  // purchase to the AMS identity exactly, but it is not worth a column
+  d.dataset.code = l.code || "";
+  if(l.code) d.title = t("colour code") + ": " + l.code;
+  const f = (k, ph, cls, val) =>
+    `<input data-k="${k}" class="${cls||''}" placeholder="${t(ph)}" value="${esc(val ?? "")}">`;
+  // epoch -> yyyy-mm-dd for <input type=date>, in local time so a late-evening
+  // order doesn't display as the day before
+  const ts = l.ordered_at ?? draftMeta.ordered_at;
+  const iso = ts ? new Date((ts - new Date(ts*1000).getTimezoneOffset()*60)*1000)
+                     .toISOString().slice(0,10) : "";
+  d.innerHTML =
+    `<input data-k="date" type="date" value="${iso}">` +
+    `<input data-k="product" list="dlProduct" placeholder="PLA Basic" value="${esc(l.product ?? "")}">` +
+    `<input data-k="color_name" list="dlColour" placeholder="${t("colour")}" value="${esc(l.color_name ?? "")}">` +
+    f("spools", "1", "num", l.spools) +
+    f("grams_each", "1000", "num", l.grams_each) +
+    f("total_price", "price", "num", l.total_price) +
+    f("order_ref", "order no.", "", l.order_ref ?? draftMeta.order_ref) +
+    `<button class="draft-x" type="button" title="${t("remove line")}">✕</button>`;
+  d.querySelector(".draft-x").addEventListener("click", ()=>{
+    const box = d.parentElement; d.remove();
+    if(box && !box.querySelector(".draft-row")) box.parentElement.innerHTML = "";
+  });
+  return d;
+}
+function draftBox(){
+  const box = $("buyDraft").querySelector(".draft");
+  if(box) return box;
+  $("buyDraft").innerHTML = draftLists() +
+    `<div class="draft">
+       <div class="draft-row draft-head"><span>${t("Ordered")}</span><span>${t("Product")}</span>
+         <span>${t("Colour")}</span><span>${t("Spools")}</span><span>${t("g each")}</span>
+         <span>${t("Price")}</span><span>${t("Order")}</span><span></span></div>
+       <div class="rows"></div>
+       <div class="buy-actions">
+         <button class="wbtn" id="buySave">${t("Save")}</button>
+         <button class="wbtn" id="buyCancel">${t("Cancel")}</button>
+       </div>
+     </div>`;
+  $("buySave").addEventListener("click", saveDraft);
+  $("buyCancel").addEventListener("click", ()=>{ $("buyDraft").innerHTML = ""; });
+  return $("buyDraft").querySelector(".draft");
+}
+async function saveDraft(){
+  const rows = [...$("buyDraft").querySelectorAll(".draft-row:not(.draft-head)")].map(r=>{
+    const o = {currency: draftMeta.currency, code: r.dataset.code || ""};
+    r.querySelectorAll("input").forEach(i=> o[i.dataset.k] = i.value.trim());
+    // the date field wins; fall back to whatever the parsed order carried
+    o.ordered_at = o.date ? Date.parse(o.date + "T12:00:00")/1000 : draftMeta.ordered_at;
+    delete o.date;
+    return o;
+  }).filter(o=> o.product || o.color_name);
+  if(!rows.length){ toast(t("Nothing to save."), true); return; }
+  let d = null;
+  try{
+    d = await (await fetch("/api/purchases", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({lines: rows})})).json();
+  }catch(_){}
+  if(!d || !d.ok){
+    toast(t("Could not save the purchase.") + (d && d.error ? " ("+d.error+")" : ""), true);
+    return;
+  }
+  $("buyDraft").innerHTML = ""; $("buyPaste").value = ""; $("buyHint").textContent = "";
+  toast(`${d.added.length} ${t("saved")}`);
+  loadFilaments();
+}
+function showParsed(d){
+  draftMeta = {order_ref: d.order_ref || "", ordered_at: d.ordered_at || null,
+               currency: d.currency || null};
+  const box = draftBox(), rows = box.querySelector(".rows");
+  rows.innerHTML = "";
+  (d.lines||[]).forEach(l=> rows.appendChild(draftRow(l)));
+  if(!(d.lines||[]).length) rows.appendChild(draftRow({}));
+  const n = (d.lines||[]).length;
+  // the importer sits under a table that can be long - don't leave the draft
+  // parked off-screen where it reads as "nothing happened"
+  box.scrollIntoView({behavior:"smooth", block:"nearest"});
+  $("buyHint").textContent =
+    (d.order_ref ? "#"+d.order_ref+" · " : "") +
+    (d.ordered_at ? new Date(d.ordered_at*1000).toLocaleDateString() + " · " : "") +
+    `${n} ${t(n ? "lines found — check them" : "no filament lines found")}` +
+    (d.source === "invoice" ? " · " + t("read from the invoice layout") : "");
+}
+async function readOrder(body, isForm){
+  let d = null;
+  try{
+    d = await (await fetch("/api/purchases/parse", {method:"POST",
+      headers: isForm ? undefined : {"Content-Type":"application/json"},
+      body})).json();
+  }catch(_){}
+  if(!d || !d.ok){
+    toast(t("Could not read that order.") + (d && d.error ? " ("+d.error+")" : ""), true);
+    return;
+  }
+  showParsed(d);
+}
+$("buyParse").addEventListener("click", ()=>{
+  const text = $("buyPaste").value.trim();
+  if(!text){ toast(t("Paste an order first."), true); return; }
+  readOrder(JSON.stringify({text}), false);
+});
+function sendFile(file){
+  if(!file) return;
+  const fd = new FormData(); fd.append("file", file);
+  $("buyHint").textContent = t("reading…");
+  readOrder(fd, true);
+}
+$("buyFile").addEventListener("change", e=> sendFile(e.target.files[0]));
+["dragenter","dragover"].forEach(ev=> $("buyDrop").addEventListener(ev, e=>{
+  e.preventDefault(); $("buyDrop").classList.add("over");
+}));
+["dragleave","drop"].forEach(ev=> $("buyDrop").addEventListener(ev, e=>{
+  e.preventDefault(); $("buyDrop").classList.remove("over");
+}));
+$("buyDrop").addEventListener("drop", e=> sendFile(e.dataTransfer.files[0]));
+$("buyAddRow").addEventListener("click", ()=>{
+  const box = draftBox();
+  const row = draftRow({});
+  box.querySelector(".rows").appendChild(row);
+  box.scrollIntoView({behavior:"smooth", block:"nearest"});
+  const first = row.querySelector('input[data-k="product"]');
+  if(first) first.focus();
+});
+// The purchase list is grouped, with a subtotal per group - what you want to
+// group BY depends on the question: "how much PLA Matte do I get through" is a
+// different one from "what did that order cost me". So it is a choice, and it
+// sticks. Groups collapse; which ones are shut survives a re-render.
+// Collapsed by default: the group headers alone are the overview, and you open
+// the one you actually want to inspect. Tracks what is OPEN, so "nothing
+// remembered" means "everything folded in".
+const buyOpen = new Set();
+let filLast = null;
+let buyGroupBy = localStorage.getItem("bambu-buygroup") || "product";
+const BUY_GROUPERS = {
+  product: p => p.product || t("Other"),
+  // a hand-entered line often has no type, but "PLA Basic" states it plainly
+  type:    p => p.type || (p.product||"").split(" ")[0].toUpperCase() || t("Other"),
+  colour:  p => p.color_name || p.code || t("Other"),
+  // the date belongs in the label: every line of one order shares it, so it
+  // stays a stable part of the key
+  order:   p => (p.order_ref || t("no order number"))
+                + (p.ordered_at ? " · " + new Date(p.ordered_at*1000).toLocaleDateString() : ""),
+  none:    () => null,
+};
+$("buyGroupSeg").addEventListener("click", e=>{
+  if(e.target.tagName !== "BUTTON") return;
+  buyGroupBy = e.target.dataset.g;
+  localStorage.setItem("bambu-buygroup", buyGroupBy);
+  buyOpen.clear();            // group names change entirely between modes
+  if(filLast) renderPurchases(filLast);
+});
+function renderPurchases(d){
+  filLast = d;
+  document.querySelectorAll("#buyGroupSeg button").forEach(b=>
+    b.classList.toggle("on", b.dataset.g === buyGroupBy));
+  const cur = d.currency||"€", ps = d.purchases||[];
+  $("buyMeta").textContent = ps.length
+    ? `${ps.length} ${t("order lines")} · ${kgF(d.totals.bought_g)} · ${money(d.totals.spent, cur)}`
+    : "";
+  const tb = $("buyTable").querySelector("tbody");
+  const unmatched = new Set((d.unmatched||[]).map(p=>p.id));
+  if(!ps.length){
+    tb.innerHTML = `<tr><td style="color:var(--text-3);padding:10px 0">${t("No purchases logged yet.")}</td></tr>`;
+    return;
+  }
+  const head =
+    `<tr><th>${t("Ordered")}</th><th>${t("Filament")}</th><th class="num">${t("Spools")}</th>
+         <th class="num">${t("Amount")}</th><th class="num">${t("Price")}</th>
+         <th class="num">${t("per kg")}</th><th>${t("Order")}</th><th class="del"></th></tr>`;
+  const keyOf = BUY_GROUPERS[buyGroupBy] || BUY_GROUPERS.product;
+  if(!keyOf({})){          // "Flat": one row per order line, newest first
+    tb.innerHTML = head + ps.map(p=> purchaseRow(p, cur, unmatched)).join("");
+    return;
+  }
+  const groups = new Map();
+  for(const p of ps){
+    const k = keyOf(p);
+    if(!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(p);
+  }
+  const ordered = [...groups.entries()].map(([name, rows])=>{
+    let grams = 0, cost = 0, spools = 0, last = 0;
+    for(const p of rows){
+      grams += (p.spools||1) * (p.grams_each||1000);
+      cost  += p.total_price||0;
+      spools += p.spools||1;
+      last = Math.max(last, p.ordered_at || p.created_at || 0);
+    }
+    return {name, rows, grams, cost, spools, last};
+  }).sort(buyGroupBy === "order"
+    // orders read chronologically; everything else biggest-spend first
+    ? (a,b)=> b.last - a.last || a.name.localeCompare(b.name)
+    : (a,b)=> b.cost - a.cost || a.name.localeCompare(b.name));
+
+  tb.innerHTML = head +
+    ordered.map(g=>{
+      const shut = !buyOpen.has(g.name);
+      const gh = `<tr class="grp${shut?" closed":""}" data-grp="${esc(g.name)}">
+        <td colspan="8"><div class="grp-row">
+          <span class="grp-caret">▾</span>
+          <span class="grp-name">${esc(g.name)}</span>
+          <span class="grp-sum">${g.rows.length} ${t(g.rows.length===1?"order line":"order lines")} · ${g.spools}× · ${kgF(g.grams)}
+            · ${money(g.cost, cur)}${g.grams ? " · ⌀ " + money(g.cost/(g.grams/1000), cur) + "/kg" : ""}</span>
+        </div></td></tr>`;
+      return gh + (shut ? "" : g.rows.map(p=> purchaseRow(p, cur, unmatched)).join(""));
+    }).join("");
+}
+function purchaseRow(p, cur, unmatched){
+      const g = (p.spools||1) * (p.grams_each||1000);
+      const when = p.ordered_at
+        ? new Date(p.ordered_at*1000).toLocaleDateString([], {year:"numeric",month:"2-digit",day:"2-digit"})
+        : "—";
+      return `<tr>
+        <td style="color:var(--text-2);white-space:nowrap">${when}</td>
+        <td><b>${esc(p.product)||"—"}</b>${p.color_name?` · ${esc(p.color_name)}`:""}${
+          p.code ? `<div class="fn-sub">${esc(p.code)}</div>` : ""}${
+          unmatched.has(p.id)
+            ? `<div class="fn-sub" style="color:var(--warn)" title="${t(
+                p.matched_by === "ambiguous"
+                  ? "several colours of this product are on record — set the colour name to match one of them"
+                  : "no filament in the AMS or the print history matches this line yet")}">${t(
+                p.matched_by === "ambiguous" ? "ambiguous — colour unclear" : "not matched to a filament")}</div>`
+            : `<div class="fn-sub" title="${t("matched by")} ${esc(p.matched_by)}">→ ${esc(p.matched_name)}</div>`}</td>
+        <td class="num">${p.spools||1}×</td>
+        <td class="num">${kgF(g)}</td>
+        <td class="num">${money(p.total_price, p.currency||cur)}</td>
+        <td class="num">${p.total_price ? money(p.total_price/(g/1000), p.currency||cur) : "—"}</td>
+        <td style="color:var(--text-3)">${esc(p.order_ref)||"—"}</td>
+        <td class="del"><button class="del-btn" type="button" data-pid="${p.id}"
+            title="${t("delete this line")}" aria-label="${t("delete this line")}">✕</button></td>
+      </tr>`;
+}
+$("buyTable").addEventListener("click", async e=>{
+  const grp = e.target.closest("tr.grp");
+  if(grp){
+    const k = grp.dataset.grp;
+    buyOpen.has(k) ? buyOpen.delete(k) : buyOpen.add(k);
+    if(filLast) renderPurchases(filLast);
+    return;
+  }
+  const b = e.target.closest("button.del-btn");
+  if(!b) return;
+  const row = b.closest("tr");
+  let d = null;
+  try{
+    d = await (await fetch("/api/purchases/delete", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({id: +b.dataset.pid})})).json();
+  }catch(_){}
+  if(!d || !d.ok){ toast(t("Could not delete this line."), true); loadFilaments(); return; }
+  if(row){ row.classList.add("gone"); await new Promise(r=>setTimeout(r,220)); }
+  toast(t("Purchase deleted"));
+  loadFilaments();
+});
 
 /* ---------- maintenance ---------- */
 const maintCol = st => st==="overdue" ? "var(--danger)" : st==="soon" ? "var(--warn)" : "var(--good)";
@@ -1871,6 +2600,7 @@ function showTab(name){
   // redraw keeps the hover geometry honest after the panel becomes visible
   if(name === "overview"){ drawChart(); drawPowerChart(); }
   if(name === "stats"){ loadStats(); }
+  if(name === "filament"){ loadFilaments(); }
   if(name === "maintenance"){ loadMaint(); }
 }
 $("tabs").addEventListener("click", e=>{

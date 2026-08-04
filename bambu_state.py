@@ -138,6 +138,11 @@ def _trays(ams_unit: dict) -> list[dict]:
             "id": _num(t.get("id")),
             "type": t.get("tray_type") or None,
             "brand": t.get("tray_sub_brands") or None,
+            # Spool identity, used to name the colour and build a reorder link.
+            # Both are also populated for third-party spools sliced with a Bambu
+            # profile, so they are only trustworthy together with is_bambu.
+            "filament_id": t.get("tray_info_idx") or None,   # SKU, e.g. GFA00
+            "code": t.get("tray_id_name") or None,           # colour code, e.g. A00-W01
             "color": _hex6(color),
             "remain_pct": _num(t.get("remain")),  # -1 = unknown (non-Bambu spool)
             # Genuine Bambu spools carry an RFID tag; third-party ones report an

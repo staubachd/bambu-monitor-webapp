@@ -51,6 +51,15 @@ runnable on Windows/macOS/Linux for development.
 - AMS: per-slot filament type, brand, colour, remaining % / grams / metres,
   humidity, drying state; active/loading slot; external (non-AMS) spools
 
+**Filament identity & reordering** (genuine Bambu spools only)
+- Each RFID spool is named in full: product line + **colour name** (`PLA Basic ·
+  Jade White`), resolved from the spool's own colour code (`tray_id_name`, e.g.
+  `A00-W01`) — the printer reports the code and the exact hex but never the name
+- A **Reorder ↗** link straight to the regional Bambu store, pre-filled with the
+  product line and colour, so a nearly-empty spool is one click from being reordered
+- Spools at or below `filament.low_pct` (default **15 %**) are flagged **Low** and
+  their tile is outlined in amber
+
 **Health**
 - HMS health warnings surfaced in the header, each **acknowledgeable** (the X2D's
   HMS codes have no public wiki pages, so ack-and-dismiss is the useful workflow);
@@ -79,9 +88,43 @@ per print must be accurate)
   telemetry tick (see [How the tricky bits work](#how-the-tricky-bits-work))
 - Finished jobs are **enriched from the Bambu Cloud** (accurate weights, timing,
   completion status)
+- **Manual grouping** — one model is often several prints, so tick the rows and
+  give them a group name. Grouped prints fold under a collapsible header carrying
+  the group's own subtotals (prints, failures, time, filament, energy, cost). The
+  header sits at the position of its newest member, so the history still reads
+  chronologically. Renaming is a click on the ✎; clearing the name dissolves the
+  group
 - **MakerWorld links** — jobs sliced from MakerWorld show a link straight to the
   source model (deep-linked to the exact print profile), on both the live job tile
   and each history row; the `design_id`/`profile_id` are captured to the database
+
+**Filament page** (own tab)
+- A historical overview of **every filament ever used**: grams, material cost,
+  number of prints, share of total consumption, and when it was last used
+- Populated **retroactively** — usage is summed from the per-slot detail already
+  stored on every past print, so the page is complete the moment it ships and can
+  never drift out of step with the print history
+- Identities are **remembered in the database** (`filaments` table), so a spool
+  keeps its product line, colour code and colour name long after it has been used
+  up and thrown away
+- Shows which filaments are **in the AMS right now** (slot, remaining %, Low flag)
+  with the same **Reorder ↗** link, so the page doubles as a shopping list
+- A **purchase log**: drop a Bambu **invoice PDF** on the page and it reads the
+  line items straight out of the invoice table — product, colour code, colour
+  name, quantity, weight and the price *actually paid* after discounts. Pasting
+  the text of an order confirmation and adding lines by hand both work too.
+  Nothing is stored until you confirm the parsed lines
+- Because the invoice's SKU prefix (`A19-K00`) **is** the code the AMS reports as
+  `tray_id_name`, an imported order matches your spools exactly rather than by
+  wording — and **teaches the app colour names** it had no way to know
+  (`A19-K00` → *Absolute Black*), which then show up on the AMS tiles
+- Purchases are **grouped by your choice** of product line, material, colour or
+  order (or flat). Groups start **folded in** — the headers alone are the overview,
+  each carrying its subtotal (lines, spools, weight, spend, average €/kg) — and you
+  open the one you want to inspect. The choice of grouping is remembered
+- With purchases logged the page shows **bought vs used vs left** per filament,
+  and the **price actually paid per kg** — which is the real number, rather than
+  the nominal one from the config price matrix
 
 **Statistics** (own tab)
 - Lifetime analytics over the whole print history: total prints, **success rate**,
@@ -128,8 +171,11 @@ server-side allowlist** — never a free-form gcode passthrough)
   camera can be watched without switching back to the overview
 
 **UI**
-- Tabbed layout: Overview / Machine / Print history / Statistics / Maintenance
-  (+ Live view when enabled)
+- Tabbed layout: Overview / Machine / History / Statistics / Filament /
+  Maintenance (+ Live when enabled)
+- **Responsive header** — below 1150 px the tab bar moves onto a full-width row of
+  its own and the serial/firmware line steps aside; below 560 px the last-update
+  stamp folds away too, so the chips still fit on a phone
 - Live updates via Server-Sent Events (no polling from the browser)
 - **German by default with a DE/EN switcher**
 - Light/dark theme toggle
@@ -207,6 +253,7 @@ whenever the server pushes a new state.
 | Printer link     | **paho-mqtt 2.x** over TLS (`ssl`), local MQTT — no cloud dependency for telemetry |
 | Smart plug       | **`tapo`** library (async; driven from a thread)                     |
 | Camera relay     | **go2rtc** (single static binary, no Docker) — RTSPS → WebRTC/MSE, launched & supervised by `app.py` |
+| Invoice import   | **pypdf** — optional, pure Python (no compiler needed on the NAS); absent it, the paste path still works |
 | Database         | **SQLite** (local dev) / **MariaDB** via **PyMySQL** (production on NAS) |
 | Frontend         | Single hand-written `dashboard.html` — vanilla JS, CSS Grid, inline-SVG charts. **No build step, no framework, no external assets** (matters behind a strict/offline NAS). |
 | i18n             | English strings are the keys; a `DE` dictionary provides German; missing entries degrade to English |
@@ -257,8 +304,9 @@ Design constraints that shaped these choices:
 | **Core runtime** (root)       | The running app — these stay in root; `app.py` imports the modules and serves the HTML. |
 | `app.py`                      | The application: Flask server, MQTT/power/cloud/purge/go2rtc worker threads, all API endpoints, SSE. |
 | `bambu_state.py`              | Pure parser: turns a raw Bambu MQTT report into a clean, stable state dict. No I/O. |
-| `storage.py`                  | Storage abstraction with two backends (sqlite / mariadb), schema, migrations, per-print upserts/deletes. |
+| `storage.py`                  | Storage abstraction with two backends (sqlite / mariadb), schema, migrations, per-print upserts/deletes, filament identities. |
 | `bambu_cloud.py`              | Bambu Cloud client (login, task list) for finished-print enrichment.    |
+| `filament_catalog.py`         | Colour-code → colour-name table, regional Bambu store search links, and the best-effort order-confirmation parser. Has a self-test (`python filament_catalog.py`). |
 | `dashboard.html`             | The entire frontend (HTML + CSS + JS + i18n) in one file.               |
 | `printer.config.json`         | **All configuration and secrets** (printer, plug, cost, filament, storage, cloud, camera). Not committed. |
 | `requirements.txt`            | Python dependencies.                                                    |
@@ -317,7 +365,13 @@ Structure, with placeholders:
     "default_per_kg": 20.0,
     "per_slot": {},                // optional overrides, keyed by AMS slot
     "per_filament_id": {},         // …by slicer filament id
-    "per_type": {}                 // …by material type
+    "per_type": {},                // …by material type
+
+    "low_pct": 15,                 // at/below this %, a spool is flagged "Low"
+    "store_region": "eu",          // eu | us | uk | jp | global (reorder links)
+    "color_names": {               // adds to / corrects the built-in table
+      "A00-N04": "Cocoa Brown"     //   key = the spool's tray_id_name code
+    }
   },
 
   "storage": {
@@ -497,10 +551,15 @@ printer (and re-enable LAN Mode Live View, which a reboot can revert).
 | `POST /api/led`            | Chamber light `{ "mode": "on"｜"off" }` (needs a live connection).   |
 | `POST /api/print/control`  | Print controls `{ "action": "pause｜resume｜stop｜speed｜fan｜temp", … }` — strict allowlist (speed 1–4, fan `cooling｜aux1｜aux2` %, temp `bed｜chamber` °C). Needs a live connection. |
 | `GET /api/stats`           | Lifetime analytics from the prints table (totals, success rate, per-month, top models). |
+| `GET /api/filaments`       | Per-filament consumption (grams, cost, prints, share, last used) joined with the stored identities, the purchase log and what is loaded in the AMS right now. |
+| `POST /api/purchases`      | Log one or more order lines `{ "lines": [ … ] }` (or a single line object). |
+| `POST /api/purchases/parse`| Read an order: an uploaded invoice PDF (`multipart`, field `file`) or pasted text (`{ "text": … }`). **Stores nothing** — returns suggested lines for the user to confirm. |
+| `POST /api/purchases/delete` | Remove one order line `{ "id": … }`.                            |
 | `GET /api/maintenance`     | Maintenance tasks with hours-since / due status, driven by cumulative print hours. |
 | `POST /api/maintenance/reset` | Mark a maintenance task done (resets its clock to the current hours). |
 | `POST /api/maintenance/config`| Edit a task's interval (or the baseline hour offset).             |
 | `POST /api/prints/label`   | Rename a print (editable job name).                                 |
+| `POST /api/prints/group`   | Put prints in a named group `{ "job_ids": […], "name": "…" }`; a blank name ungroups them. |
 | `POST /api/prints/filament`| Override the filament grams for a print.                            |
 | `POST /api/prints/delete`  | Delete one print from the history `{ "job_id": … }`. Refuses a currently-running job with **409**; the telemetry time-series is left untouched. |
 | `POST /api/cloud/refresh`  | Trigger an immediate Bambu Cloud enrichment pass.                   |
@@ -519,12 +578,25 @@ migration list, so the schema can evolve without manual `ALTER`s.
   noz_tgt, chamber, fan_cooling, speed_mag, wifi_dbm`.
 - **`prints`** — one summary row per job: identity (`job_id`, `name`,
   `design_title`, and the MakerWorld `design_id` / `profile_id`), timing
-  (`started_at`, `ended_at`), `final_state`, `total_layers`, and the cost fields
+  (`started_at`, `ended_at`), `final_state`, `total_layers`, the user's group name
+  (`pgroup`), and the cost fields
   (energy Wh, filament grams, per-material price, computed cost). Some columns are
   **immutable once set** (start time, label, filament identity, error code) to keep
   enrichment from clobbering user edits or live data. Rows can be deleted from the
   history page; that removes only the summary row — `telemetry` is a plain time
   series and isn't owned by any single job.
+- **`filaments`** — one row per filament identity ever seen in the AMS: `fkey`
+  (SKU + colour, the aggregation key), SKU, colour code, product line, hex, colour
+  name, material, `is_bambu`, `first_seen` / `last_seen`. Identity only — **no
+  usage counters**, which are aggregated from `prints.filament_detail` instead so
+  the two can never disagree. Updates never overwrite a populated field with a
+  blank one, so a frame where the RFID tag wasn't read can't erase a good read.
+- **`purchases`** — one row per order *line* (not per spool): `fkey` when the
+  filament is known, free-text product/colour otherwise, spool count, grams each,
+  price paid, currency, order date and reference. Deliberately not linked by a
+  foreign key — a purchase is matched to a filament at read time on "product line
+  + colour name", so a spool bought today links itself up the first time the AMS
+  actually sees it.
 - **`settings`** — small key/value store (e.g. the persisted recording mode, HMS
   acknowledgements, and per-task maintenance intervals / reset marks).
 
@@ -553,6 +625,90 @@ A few behaviours are non-obvious because the printer's raw data is messy:
   only sees the slicer profile — is the authoritative signal used to pick the right
   price from the brand × material matrix.
 
+- **Filament usage is derived, never counted.** The Filament page sums
+  `prints.filament_detail` on every request instead of incrementing a stored
+  counter. That makes it retroactive (every past print already carries per-slot
+  grams), immune to double-counting on a restart, and self-correcting when a print
+  is deleted or its grams are overridden — a manual override is applied
+  proportionally to the per-slot entries, so the page's total always matches the
+  history page's. Verified against the real database: 646.2 g / 9.3707 € both ways.
+
+- **The invoice knows what the printer doesn't.** A Bambu invoice line reads
+  `SKU: A19-K00-1.75-1000-SPL` / `Variant: Absolute Black (17101)`, and that SKU
+  prefix is character-for-character the `tray_id_name` the AMS reports. So an
+  imported invoice joins to a spool **by code**, carries the colour name the
+  printer never sends, and states the price actually charged (the *Items
+  SubTotal* column, after discount) rather than the list price — €15.39/kg on
+  that line, not the €24.99 the config matrix assumes. Learned names are stored
+  under `cname_<CODE>` in `settings` and outrank the built-in guess table;
+  `filament.color_names` in the config still outranks everything.
+
+- **Accessories are not filament.** Build plates and spools appear in the same
+  table (`SKU: FAP017-N`, `RSP001`); only SKUs carrying a `-1.75-` diameter field
+  are imported. On the test invoice: 6 filament lines totalling €80.24, with the
+  plate (€19.99) and three spools (€27.28) skipped — €127.51 grand total.
+
+- **Order parsing suggests, it never saves.** Bambu's receipt layout can't be
+  verified from inside this project and will change, so `parse_order()` is
+  explicitly best-effort: it returns `None` for anything it can't read rather than
+  inventing a price or a quantity, and every line lands in an editable draft that
+  the user confirms. Two bugs that shaped it, both covered by the self-test: a
+  trailing-symbol price pattern reads `×1  € 27,99` as *one euro* unless
+  symbol-before-number is tried first, and `\b` after `€` never matches at
+  end-of-line because `€` isn't a word character.
+
+- **Colour codes are compared canonically, names never are.** The AMS pads the
+  colour part of `tray_id_name` to two digits, the store's SKU does not always —
+  one real invoice carries both `A19-K00` and `A01-R4`. So codes are normalised
+  (`A00-W01` ≡ `A00-W1`, while `W1` and `W2` stay distinct) before any comparison.
+  This matters more than it looks: a regional store returns *localised* colour
+  names, so the same spool is "Jade Weiß" on a German invoice and "Jade White" in
+  the built-in table. Matching on the code sidesteps the language entirely, and
+  the invoice's wording then replaces the guess everywhere — Filament page, AMS
+  tile and reorder link.
+
+- **Four ways a purchase finds its filament.** Tried in order, most certain
+  first: an explicit `fkey`; the colour **code** against an AMS identity; the
+  **wording** (product + colour name); and finally the **SKU derived from the
+  code** — `A19-K00` → `GFA19`, because `GF` + the code's letter + its two digits
+  is the `tray_info_idx` the printer reports (verified on PLA Pure, PLA Basic and
+  PETG Basic). That last route is what reaches filament used up long ago: a print
+  row carries the SKU and a colour hex but no colour code, while an invoice
+  carries a colour code but neither SKU nor hex, so nothing else bridges them.
+  When one SKU covers several colours the colour name decides; if it can't, the
+  line stays **ambiguous** rather than guessing. Every purchase shows which route
+  matched it, so a miss is diagnosable instead of mysterious.
+
+- **Bought-but-unused filament is still filament.** A purchase that matches
+  nothing gets its own row — keyed by colour code, so four colours of one product
+  stay four rows — marked **unused** with 0 g used. It folds into the real entry
+  automatically the first time that spool is printed with or seen in the AMS,
+  because only *unmatched* purchases generate these rows.
+
+- **"Left" can go negative.** Bought minus used, shown as-is rather than clamped:
+  a negative simply means orders from before the log existed are missing, and
+  hiding that would make the number look trustworthy when it isn't.
+
+- **One filament = SKU + colour, not one spool.** `GFA00|FFFFFF` is the only key
+  the live AMS and the cloud's per-print detail both carry. Two spools of the same
+  Jade White are deliberately one entry; per-physical-spool tracking would need
+  `tray_uuid`, which no past print recorded.
+
+- **Colour names are looked up, never guessed.** An RFID spool reports its product
+  line (`PLA Basic`), SKU (`GFA00`), colour code (`A00-W01`) and exact hex — but not
+  the marketing colour name. `filament_catalog.COLOR_NAMES` maps only codes
+  confirmed against real reports; anything unknown shows the raw code plus the hex
+  swatch, because a confidently wrong colour name is worse than none when the point
+  is to reorder the same spool. Add your own in `filament.color_names`.
+
+- **Reorder links are searches, not deep links.** `/search?q=PLA+Basic+Jade+White`
+  rather than `/products/<handle>`: product handles can't be verified from here and
+  a 404 at the moment you want to reorder is worse than one extra click.
+
+- **"Low" only applies to RFID spools.** Remaining % comes from the tag, so a
+  third-party tray reports `-1` and an external spool reports `0` — neither means
+  empty, and warning on them would cry wolf on every non-Bambu spool.
+
 - **Cost is monotonic per print.** Energy for a running print only ever increases
   and is seeded from the stored value on restart, so a restart mid-print can't reset
   a job's accumulated cost to zero, and a new job can't inherit the previous one's.
@@ -569,6 +725,12 @@ A few behaviours are non-obvious because the printer's raw data is messy:
 - **MakerWorld id survives partial reports.** Bambu's incremental MQTT frames often
   omit `design_id`/`profile_id`, so they're **latched in memory** while a job prints
   and persisted from there — a partial update can't null out the stored model link.
+
+- **A print group is a name, not a table.** `prints.pgroup` holds the group's
+  name directly: no ids to keep in step, renaming is "write the new name on the
+  same rows", and a group stops existing when its last member leaves. It sits in
+  `PRINT_IMMUTABLE` alongside `label` — without that the 60-second persist tick
+  would blank it on the running print, which is covered by a regression test.
 
 - **A deleted print has to be tombstoned.** The printer keeps reporting the *last*
   job's `task_id` for as long as it sits idle, so simply deleting the row would let
@@ -607,6 +769,14 @@ A few behaviours are non-obvious because the printer's raw data is messy:
 | `#1054 Unknown column …` (MariaDB)                  | Backend is on MariaDB but the schema is behind; the column-migration runs on startup — restart the app, or check the config didn't get flipped to sqlite. |
 | Garbled `°`/`€`/umlauts after editing on Windows    | A file was round-tripped through PowerShell; re-edit with a UTF-8-aware tool. |
 | Cloud login fails                                   | Re-run `tools/setup_cloud.py` to refresh the stored token.                  |
+| A spool shows a **code** (`A00-N04`) instead of a colour name | That code isn't in the built-in table. Add `"A00-N04": "Cocoa Brown"` under `filament.color_names` and restart. |
+| A purchase says **"not matched to a filament"** | Nothing on record matches it yet — that filament has neither been printed with nor seen in the AMS. It still appears on the page as **unused** stock, and links itself the first time the spool is loaded or used. |
+| A purchase says **"ambiguous — colour unclear"** | Several colours of that product are on record and the colour name doesn't single one out — commonly a localised name ("Jade Weiß") against an English one. Fix the line's **colour code** rather than its name: the code match ignores language. |
+| Uploading a PDF says **"pypdf is not installed"** | The PDF reader is an optional dependency, and it must go into the **app's venv**, not the system Python: `cd /volume1/apps/bambu-monitor && ./venv/bin/python3 -m pip install pypdf`, then restart. Or paste the invoice text instead. |
+| Saving a purchase fails with **"Unknown column …"** | A column added after that table first shipped. Every such column is listed in `storage.LATE_COLUMNS` and applied on startup — restart the app; the log shows `[store] migrated: added …`. |
+| **Bought/Left** columns are empty                   | No purchases logged for that filament yet. Paste an order, or add a line by hand on the Filament tab. |
+| Filament page shows only **material + hex** for an old filament | It was used up before the page existed, so the AMS never recorded its identity. Only prints carry it, and they store just SKU + colour. It names itself properly if a spool of it is loaded again. |
+| A spool has **no Reorder link / no "Low" flag**     | It isn't a genuine Bambu spool (`tag_uid` is all-zero), so the printer reports neither an identity nor a real remaining %. Expected for third-party and external spools. |
 | Deleting a print says **"print is still running"**  | Intentional: the job is active, its energy total is still accumulating and it would be re-created anyway. Delete it once it has finished. |
 | Deleted prints changed the **Statistics/Maintenance** figures | Expected — both aggregate over the `prints` table, so removing a row also removes its hours, energy and filament from the totals. |
 | Live view spins / no picture                        | Printer serves **one** camera client at a time — close the Handy app / Bambu Studio / other tabs; if wedged, power-cycle the printer and re-enable LAN Mode Live View. Confirm with the `curl … stream.mp4` test. See [Live view](#live-view-camera). |

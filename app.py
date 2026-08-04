@@ -27,6 +27,7 @@ from datetime import datetime, timedelta, timezone
 import paho.mqtt.client as mqtt
 from flask import Flask, Response, jsonify, request, send_file
 
+import filament_catalog
 from bambu_state import parse_report
 from storage import Storage
 
@@ -565,6 +566,8 @@ def on_message(client, userdata, msg):
     if len(raw.get("print", {})) > 40:   # keep the last *full* report for /api/raw
         _last_raw["data"] = raw
     state = parse_report(raw)
+    _enrich_ams(state)
+    _observe_filaments(state)
     if _versions["firmware"]:   # override the misleading `ver` with the ota version
         state["printer"]["firmware"] = _versions["firmware"]
     state["connected"] = True
@@ -669,6 +672,337 @@ def power_worker():
 
 FIL_CFG = CFG.get("filament", {}) or {}
 CLOUD_CFG = CFG.get("cloud", {}) or {}
+
+# Reordering: what counts as "nearly used up", and which regional store to link.
+FIL_LOW_PCT = float(FIL_CFG.get("low_pct", 15))
+FIL_STORE_REGION = FIL_CFG.get("store_region", filament_catalog.DEFAULT_REGION)
+FIL_STORE_HOST = FIL_CFG.get("store_host")          # full host override, optional
+FIL_COLOR_NAMES = FIL_CFG.get("color_names") or {}  # extends/corrects the built-ins
+# Colour names read off imported invoices - Bambu's own wording, so they beat the
+# built-in guess table. Config still wins, as the last word is always the user's.
+try:    # keys are canonicalised on load, so entries written before norm_code
+    _LEARNED_COLORS = {filament_catalog.norm_code(k): v
+                       for k, v in store.settings_with_prefix("cname_").items()}
+except Exception:
+    _LEARNED_COLORS = {}
+
+
+def _color_overrides() -> dict:
+    return {**_LEARNED_COLORS, **FIL_COLOR_NAMES}
+
+
+def _enrich_ams(state: dict) -> None:
+    """Annotate every tray in place with colour name, reorder link and a
+    low-stock flag. Purely presentational, so it lives here and not in the
+    parser, which stays a pure function of the printer's report."""
+    ams = state.get("ams") or {}
+    for trays in [u.get("trays") or [] for u in (ams.get("units") or [])] + [ams.get("external") or []]:
+        for tr in trays:
+            tr.update(filament_catalog.describe(
+                tr, overrides=_color_overrides(),
+                region=FIL_STORE_REGION, host=FIL_STORE_HOST))
+            pct = tr.get("remain_pct")
+            # Only an RFID spool reports a real remaining %: a third-party tray
+            # sends -1 and an external spool sends 0, and neither means empty -
+            # warning on those would cry wolf on every non-Bambu spool.
+            tr["low"] = (bool(tr.get("is_bambu")) and pct is not None
+                         and 0 <= pct <= FIL_LOW_PCT)
+    if ams:
+        ams["low_pct"] = FIL_LOW_PCT
+
+
+_fil_obs = {}   # fkey -> (identity tuple, ts) of what was last written
+
+
+def _observe_filaments(state: dict) -> None:
+    """Remember every filament the AMS shows, so the Filament page can still name
+    a spool years after it was used up and thrown away.
+
+    Runs on the MQTT frame rate, so it writes only when an identity actually
+    changes (or hourly, to keep last_seen meaningful) - the trays change a few
+    times a week, not once a second.
+    """
+    now = time.time()
+    ams = state.get("ams") or {}
+    for trays in [u.get("trays") or [] for u in (ams.get("units") or [])] + [ams.get("external") or []]:
+        for tr in trays:
+            if not tr.get("type"):
+                continue          # empty slot
+            fkey = filament_catalog.key(tr.get("filament_id"), tr.get("color"), tr.get("type"))
+            ident = (tr.get("filament_id"), tr.get("code"), tr.get("brand"),
+                     filament_catalog.norm_color(tr.get("color")), tr.get("color_name"),
+                     tr.get("type"), bool(tr.get("is_bambu")))
+            prev = _fil_obs.get(fkey)
+            if prev and prev[0] == ident and (now - prev[1]) < 3600:
+                continue
+            try:
+                store.upsert_filament(
+                    fkey, filament_id=ident[0], code=ident[1], product=ident[2],
+                    color=ident[3], color_name=ident[4], type=ident[5],
+                    is_bambu=int(ident[6]))
+                _fil_obs[fkey] = (ident, now)
+            except Exception as e:
+                print(f"[filament] upsert failed: {e}")
+
+
+def _detail_entries(row: dict) -> list[dict]:
+    """Per-slot filament entries of one print, with a manual grams override
+    applied proportionally - so the Filament page adds up to the same total the
+    history row shows rather than to the cloud's original estimate."""
+    try:
+        entries = json.loads(row.get("filament_detail") or "[]") or []
+    except (TypeError, ValueError):
+        return []
+    base = sum(float(e.get("grams") or 0) for e in entries)
+    manual = row.get("filament_g_manual")
+    scale = (float(manual) / base) if (manual and base) else 1.0
+    out = []
+    for e in entries:
+        g = float(e.get("grams") or 0) * scale
+        out.append({**e, "grams": g, "cost": float(e.get("cost") or 0) * scale})
+    return out
+
+
+def _match_purchase(p: dict, agg: dict, known: dict,
+                    fkey_by_code: dict, fkey_by_match: dict) -> tuple:
+    """Link one purchase to a filament identity. Returns (fkey|None, how).
+
+    Four routes, most certain first. The SKU route is the one that reaches
+    filaments used up before the AMS was ever observed: their print rows carry a
+    SKU and a colour but no colour code, and an invoice carries a colour code but
+    neither SKU nor hex - `sku_from_code` is the bridge between the two.
+    """
+    if p.get("fkey") and p["fkey"] in agg:
+        return p["fkey"], "fkey"
+    # canonical, so the store's 'A00-W1' finds the AMS's 'A00-W01'
+    code = filament_catalog.norm_code(p.get("code")) or ""
+    hit = fkey_by_code.get(code)
+    if hit and hit in agg:
+        return hit, "code"
+    hit = fkey_by_match.get(filament_catalog.match_key(p.get("product"),
+                                                       p.get("color_name")))
+    if hit and hit in agg:
+        return hit, "name"
+    sku = filament_catalog.sku_from_code(code)
+    if sku:
+        cands = [k for k in agg if k.startswith(sku + "|")]
+        if len(cands) == 1:
+            return cands[0], "sku"
+        # several colours of the same product: let the colour name decide, and
+        # rather than pick one at random, stay unmatched when it can't
+        want = (p.get("color_name") or "").strip().lower()
+        if want:
+            named = [k for k in cands
+                     if (known.get(k, {}).get("color_name") or "").strip().lower() == want]
+            if len(named) == 1:
+                return named[0], "sku+colour"
+        if cands:
+            return None, "ambiguous"
+    return None, None
+
+
+def _filament_stats() -> dict:
+    """Consumption per filament across the whole print history.
+
+    Aggregated live from prints.filament_detail rather than kept in a counter
+    table: the detail is already stored for every past print, so the page is
+    complete from day one and can never drift out of step with the history.
+    """
+    cur = COST_CFG.get("currency", "€")
+    try:
+        prints = store.all_prints()
+    except Exception:
+        prints = []
+    try:
+        known = {f["fkey"]: f for f in store.all_filaments()}
+    except Exception:
+        known = {}
+
+    agg = {}
+    for r in prints:
+        started = r.get("started_at")
+        for e in _detail_entries(r):
+            fkey = filament_catalog.key(e.get("filament_id"), e.get("color"),
+                                        e.get("type"))
+            a = agg.setdefault(fkey, {
+                "fkey": fkey, "filament_id": e.get("filament_id"),
+                "color": filament_catalog.norm_color(e.get("color")),
+                "type": e.get("type"), "grams": 0.0, "cost": 0.0, "prints": 0,
+                "first_used": None, "last_used": None,
+            })
+            a["grams"] += e["grams"]
+            a["cost"] += e["cost"]
+            a["prints"] += 1
+            # the detail's brand came from the RFID snapshot taken while that
+            # print ran, so it still knows genuine-vs-third-party for filaments
+            # the AMS has never shown us (used up before this page existed)
+            if e.get("brand") in ("Bambu", "third-party"):
+                a["brand"] = e["brand"]
+            if started:
+                a["first_used"] = min(a["first_used"] or started, started)
+                a["last_used"] = max(a["last_used"] or started, started)
+
+    # spools seen in the AMS but never printed with yet still belong on the page
+    for fkey, f in known.items():
+        agg.setdefault(fkey, {
+            "fkey": fkey, "filament_id": f.get("filament_id"),
+            "color": f.get("color"), "type": f.get("type"),
+            "grams": 0.0, "cost": 0.0, "prints": 0,
+            "first_used": None, "last_used": None,
+        })
+
+    # purchases, matched to a filament by fkey when known and otherwise by
+    # 'product line + colour name' - a receipt carries words, never a SKU or a hex
+    try:
+        purchases = store.all_purchases()
+    except Exception:
+        purchases = []
+    buys, unmatched = {}, []
+    fkey_by_match, fkey_by_code = {}, {}
+    for fkey, f in known.items():
+        mk = filament_catalog.match_key(f.get("product"), f.get("color_name"))
+        if mk:
+            fkey_by_match.setdefault(mk, fkey)
+        nc = filament_catalog.norm_code(f.get("code"))
+        if nc:
+            fkey_by_code.setdefault(nc, fkey)
+    for p in purchases:
+        fkey, how = _match_purchase(p, agg, known, fkey_by_code, fkey_by_match)
+        p["matched_by"] = how
+        if not fkey:
+            unmatched.append(p)
+            continue
+        p["_fkey"] = fkey       # resolved to a display name once `out` is built
+        b = buys.setdefault(fkey, {"grams": 0.0, "cost": 0.0, "spools": 0,
+                                   "orders": 0, "last": None})
+        b["grams"] += float(p.get("spools") or 1) * float(p.get("grams_each") or 1000)
+        b["cost"] += float(p.get("total_price") or 0)
+        b["spools"] += int(p.get("spools") or 1)
+        b["orders"] += 1
+        when = p.get("ordered_at") or p.get("created_at")
+        if when:
+            b["last"] = max(b["last"] or when, when)
+
+    # what is in the AMS right now -> remaining %, slot and the reorder link
+    with _state_lock:
+        ams = json.loads(json.dumps((_state.get("ams") or {})))   # cheap deep copy
+    loaded = {}
+    groups = [(u.get("trays") or [], False) for u in (ams.get("units") or [])]
+    groups.append((ams.get("external") or [], True))
+    for trays, ext in groups:
+        for tr in trays:
+            if tr.get("type"):
+                loaded[filament_catalog.key(tr.get("filament_id"), tr.get("color"),
+                                            tr.get("type"))] = (tr, ext)
+
+    total_g = sum(a["grams"] for a in agg.values()) or 0.0
+    out = []
+    for fkey, a in agg.items():
+        meta = known.get(fkey, {})
+        tr, ext = loaded.get(fkey, (None, False))
+        # RFID truth, whichever source has it: a live tag beats a past snapshot
+        is_bambu = (bool(meta["is_bambu"]) if meta.get("is_bambu") is not None
+                    else (a["brand"] == "Bambu" if a.get("brand") else None))
+        b = buys.get(fkey)
+        out.append({
+            # what was bought vs what has been used. `left` can go negative when
+            # older orders were never logged - shown as-is rather than clamped,
+            # because a negative is the signal that the log is incomplete.
+            "bought_g": round(b["grams"], 1) if b else None,
+            "bought_cost": round(b["cost"], 4) if b else None,
+            "spools": b["spools"] if b else None,
+            "orders": b["orders"] if b else None,
+            "last_order": b["last"] if b else None,
+            "left_g": round(b["grams"] - a["grams"], 1) if b else None,
+            "paid_per_kg": (round(b["cost"] / (b["grams"] / 1000.0), 2)
+                            if b and b["grams"] else None),
+            **a,
+            "grams": round(a["grams"], 1),
+            "cost": round(a["cost"], 4),
+            "share": round(a["grams"] / total_g, 4) if total_g else 0,
+            # naming comes from the AMS observation; the cloud detail never
+            # carries the product line or the colour code
+            "code": meta.get("code"),
+            "product": meta.get("product"),
+            "color_name": meta.get("color_name"),
+            "color": a.get("color") or meta.get("color"),
+            "is_bambu": is_bambu,
+            "first_seen": meta.get("first_seen"),
+            # ids 254/255 are the virtual external slots, not a real AMS bay
+            "slot": None if (ext or not tr or tr.get("id") is None) else tr["id"] + 1,
+            "external": bool(tr) and ext,
+            "loaded": bool(tr),
+            "remain_pct": tr.get("remain_pct") if tr else None,
+            "grams_left": tr.get("grams_left") if tr else None,
+            "low": bool(tr.get("low")) if tr else False,
+            "store_url": tr.get("store_url") if tr else None,
+        })
+    # Filament that was bought but never printed with belongs on the page too -
+    # it is stock on the shelf. Keyed by colour code so four colours of the same
+    # product stay four rows. Each folds into the real entry as soon as that
+    # spool is used or turns up in the AMS, because only *unmatched* purchases
+    # land here.
+    owned = {}
+    for p in unmatched:
+        nc = filament_catalog.norm_code(p.get("code"))
+        k = ("code:" + nc) if nc else (
+            "name:" + (filament_catalog.match_key(p.get("product"), p.get("color_name"))
+                       or str(p.get("id"))))
+        o = owned.setdefault(k, {
+            "fkey": k, "filament_id": filament_catalog.sku_from_code(p.get("code")),
+            "code": p.get("code"), "product": p.get("product"),
+            "color_name": p.get("color_name"), "color": p.get("color"),
+            "type": p.get("type"), "grams": 0.0, "cost": 0.0, "prints": 0,
+            "share": 0, "first_used": None, "last_used": None, "is_bambu": None,
+            "first_seen": None, "slot": None, "external": False, "loaded": False,
+            "remain_pct": None, "grams_left": None, "low": False, "store_url": None,
+            "bought_g": 0.0, "bought_cost": 0.0, "spools": 0, "orders": 0,
+            "last_order": None, "left_g": 0.0, "paid_per_kg": None,
+            "unused": True,   # nothing printed with it yet
+        })
+        g = float(p.get("spools") or 1) * float(p.get("grams_each") or 1000)
+        o["bought_g"] += g
+        o["bought_cost"] += float(p.get("total_price") or 0)
+        o["spools"] += int(p.get("spools") or 1)
+        o["orders"] += 1
+        when = p.get("ordered_at") or p.get("created_at")
+        if when:
+            o["last_order"] = max(o["last_order"] or when, when)
+    for o in owned.values():
+        o["bought_g"] = round(o["bought_g"], 1)
+        o["bought_cost"] = round(o["bought_cost"], 4)
+        o["left_g"] = o["bought_g"]
+        o["paid_per_kg"] = (round(o["bought_cost"] / (o["bought_g"] / 1000.0), 2)
+                            if o["bought_g"] else None)
+    out.extend(owned.values())
+
+    out.sort(key=lambda x: (-x["grams"], -(x["bought_g"] or 0), x["fkey"]))
+    # tell each purchase which filament it landed on, so the page can show the
+    # link instead of leaving the user to infer it
+    names = {f["fkey"]: (f.get("product") or f.get("type") or "?")
+                        + " · " + (f.get("color_name") or "#" + (f.get("color") or "??????"))
+             for f in out}
+    for p in purchases:
+        fk = p.pop("_fkey", None)
+        if fk:
+            p["matched_name"] = names.get(fk)
+    spent = sum(float(p.get("total_price") or 0) for p in purchases)
+    bought_g = sum(float(p.get("spools") or 1) * float(p.get("grams_each") or 1000)
+                   for p in purchases)
+    return {
+        "currency": cur,
+        "totals": {"filaments": len(out), "grams": round(total_g, 1),
+                   "unused": sum(1 for o in out if o.get("unused")),
+                   "cost": round(sum(a["cost"] for a in agg.values()), 4),
+                   "prints": sum(1 for r in prints if _detail_entries(r)),
+                   "bought_g": round(bought_g, 1), "spent": round(spent, 2),
+                   "orders": len(purchases)},
+        "filaments": out,
+        "purchases": purchases,
+        # logged but not attributable to any filament yet: usually a spool that
+        # has never been in the AMS, or a wording the match didn't recognise
+        "unmatched": unmatched,
+    }
 
 
 def _ams_bambu_map(state: dict) -> dict:
@@ -953,6 +1287,133 @@ def api_stats():
     return jsonify(_stats_block())
 
 
+@app.route("/api/filaments")
+def api_filaments():
+    return jsonify(_filament_stats())
+
+
+def _num_or_none(v, cast=float):
+    try:
+        s = str(v).strip().replace(",", ".")
+        return cast(float(s)) if s else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _pdf_text(data: bytes) -> str:
+    """Text of a PDF. pypdf is an OPTIONAL dependency: it is pure Python, so it
+    installs on the NAS without a compiler, but the paste box has to keep working
+    on installs that never added it."""
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        raise RuntimeError("pypdf is not installed on the server "
+                           "- run: pip install pypdf (or paste the text instead)")
+    from io import BytesIO
+    return "\n".join((p.extract_text() or "") for p in PdfReader(BytesIO(data)).pages)
+
+
+def _learn_color(code: str | None, name: str | None) -> None:
+    """Remember a colour name an invoice taught us, for this code, for good.
+
+    Stored against the canonical code so the store's SKU spelling ('A00-W1') and
+    the AMS's ('A00-W01') resolve to the same entry - otherwise a German store
+    name would never reach the spool it belongs to.
+    """
+    code = filament_catalog.norm_code(code)
+    name = (name or "").strip()
+    if not code or not name or _LEARNED_COLORS.get(code) == name:
+        return
+    try:
+        store.set_setting("cname_" + code, name)
+        _LEARNED_COLORS[code] = name
+        # apply it to identities already on record, so the Filament page and the
+        # AMS tiles show the real name at once rather than after the next frame
+        for f in store.all_filaments():
+            if filament_catalog.norm_code(f.get("code")) == code:
+                store.set_filament_color(f["fkey"], name)
+        print(f"[filament] learned colour {code} = {name}")
+    except Exception as e:
+        print(f"[filament] could not store colour name: {e}")
+
+
+@app.route("/api/purchases", methods=["POST"])
+def api_purchase_add():
+    """Log one order line. Everything is optional except a product or colour to
+    call it by - a receipt the parser only half-read is still worth keeping."""
+    data = request.get_json(force=True, silent=True) or {}
+    rows = data.get("lines") if isinstance(data.get("lines"), list) else [data]
+    added = []
+    try:
+        added = _store_purchases(rows)
+    except Exception as e:      # surface the real reason - a bare 500 leaves the
+        print(f"[purchases] save failed: {e}")   # browser guessing
+        return jsonify({"ok": False, "error": str(e)[:300]}), 500
+    if not added:
+        return jsonify({"ok": False, "error": "nothing to save"}), 400
+    return jsonify({"ok": True, "added": added})
+
+
+def _store_purchases(rows: list) -> list:
+    added = []
+    for r in rows:
+        product = (r.get("product") or "").strip()[:64]
+        color_name = (r.get("color_name") or "").strip()[:64]
+        if not product and not color_name:
+            continue
+        spools = _num_or_none(r.get("spools"), int) or 1
+        code = (r.get("code") or "").strip().upper()[:24] or None
+        _learn_color(code, color_name)
+        added.append(store.add_purchase(
+            fkey=(r.get("fkey") or "").strip()[:64] or None, code=code,
+            product=product or None, color_name=color_name or None,
+            color=filament_catalog.norm_color(r.get("color")),
+            type=(r.get("type") or "").strip()[:24] or None,
+            spools=max(1, spools),
+            grams_each=_num_or_none(r.get("grams_each")) or 1000.0,
+            total_price=_num_or_none(r.get("total_price")),
+            currency=(r.get("currency") or COST_CFG.get("currency", "€"))[:8],
+            ordered_at=_num_or_none(r.get("ordered_at")),
+            order_ref=(r.get("order_ref") or "").strip()[:64] or None,
+            note=(r.get("note") or "").strip()[:255] or None))
+    return added
+
+
+@app.route("/api/purchases/delete", methods=["POST"])
+def api_purchase_delete():
+    data = request.get_json(force=True, silent=True) or {}
+    pid = _num_or_none(data.get("id"), int)
+    if pid is None:
+        return jsonify({"ok": False, "error": "missing id"}), 400
+    return jsonify({"ok": store.delete_purchase(pid), "id": pid})
+
+
+@app.route("/api/purchases/parse", methods=["POST"])
+def api_purchase_parse():
+    """Read an order: an uploaded invoice PDF, or pasted text.
+
+    Stores nothing - the result is a suggestion the user corrects and then saves.
+    A Bambu invoice is recognised by its layout and parsed precisely (colour code,
+    real price paid); anything else falls back to loose text heuristics.
+    """
+    f = request.files.get("file")
+    if f is not None:
+        blob = f.read(8 * 1024 * 1024)      # an invoice is tens of KB; cap anyway
+        if not blob:
+            return jsonify({"ok": False, "error": "empty file"}), 400
+        try:
+            text = (_pdf_text(blob) if (f.filename or "").lower().endswith(".pdf")
+                    else blob.decode("utf-8", "replace"))
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)[:300]}), 400
+    else:
+        data = request.get_json(force=True, silent=True) or {}
+        text = (data.get("text") or "")[:40000]
+    if not text.strip():
+        return jsonify({"ok": False, "error": "nothing to read"}), 400
+    return jsonify({"ok": True, **filament_catalog.parse_order(text)})
+
+
 @app.route("/api/maintenance")
 def api_maintenance():
     return jsonify(_maintenance_block())
@@ -1042,6 +1503,30 @@ def api_print_label():
     if job_id == _print_row.get("job_id"):
         _print_row.setdefault("stored", {})["label"] = label or None
     return jsonify({"ok": ok, "job_id": job_id, "label": label or None})
+
+
+@app.route("/api/prints/group", methods=["POST"])
+def api_print_group():
+    """Group prints under a name, or ungroup them when the name is blank.
+
+    One model often takes several prints; grouping is how the history stops
+    reading as a flat list of unrelated jobs. Renaming a group is the same call
+    with the same jobs and a different name.
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    jobs = [str(j).strip() for j in (data.get("job_ids") or []) if str(j).strip()]
+    name = (data.get("name") or "").strip()[:120]
+    if not jobs:
+        return jsonify({"ok": False, "error": "no prints selected"}), 400
+    try:
+        n = store.set_print_group(jobs, name or None)
+    except Exception as e:
+        print(f"[prints] group failed: {e}")
+        return jsonify({"ok": False, "error": str(e)[:300]}), 500
+    # keep the live tile in step if the running print was part of it
+    if _print_row.get("job_id") in jobs:
+        _print_row.setdefault("stored", {})["pgroup"] = name or None
+    return jsonify({"ok": True, "updated": n, "name": name or None})
 
 
 @app.route("/api/prints/delete", methods=["POST"])

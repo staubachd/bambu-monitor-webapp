@@ -24,7 +24,10 @@
     "default_per_kg": 20.0,
     "per_slot": {},
     "per_filament_id": {},
-    "per_type": {}
+    "per_type": {},
+    "low_pct": 15,
+    "store_region": "eu",
+    "color_names": { "A00-W01": "Jade White" }
   },
 
   "storage": {
