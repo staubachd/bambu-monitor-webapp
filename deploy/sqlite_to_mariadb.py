@@ -89,6 +89,8 @@ copy("hms_ack")
 copy("settings")
 copy("filaments")
 copy("purchases")
+copy("notes")
+copy("note_images")
 
 cur.execute("SELECT COUNT(*) FROM telemetry"); t = cur.fetchone()[0]
 cur.execute("SELECT COUNT(*) FROM prints"); p = cur.fetchone()[0]

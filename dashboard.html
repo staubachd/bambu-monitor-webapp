@@ -314,6 +314,27 @@
   .spool-tags:empty{display:none}
   .reorder{font-size:11px; font-weight:650; color:var(--accent); text-decoration:none; white-space:nowrap}
   .reorder:hover{text-decoration:underline}
+  .assign-btn{font:inherit; font-size:10px; font-weight:700; letter-spacing:.04em;
+    text-transform:uppercase; cursor:pointer; padding:2px 7px; border-radius:5px;
+    border:1px solid var(--border-strong); background:var(--surface); color:var(--text-3)}
+  .assign-btn:hover{border-color:var(--accent); color:var(--accent)}
+
+  /* slot assignment picker */
+  .modal{position:fixed; inset:0; z-index:70; display:grid; place-items:center;
+    background:rgba(0,0,0,.45); padding:18px}
+  .modal[hidden]{display:none}
+  .modal-card{background:var(--surface); border:1px solid var(--border-strong);
+    border-radius:18px; box-shadow:var(--shadow-lg); padding:18px;
+    width:min(460px,100%); max-height:min(70vh,620px); display:flex; flex-direction:column}
+  .asg-list{overflow-y:auto; display:flex; flex-direction:column; gap:4px; margin:2px 0 4px}
+  .asg-item{display:flex; align-items:center; gap:11px; padding:9px 10px; border-radius:11px;
+    border:1px solid transparent; background:none; cursor:pointer; text-align:left; font:inherit;
+    color:var(--text); width:100%}
+  .asg-item:hover{background:var(--surface-2); border-color:var(--border)}
+  .asg-item .an{font-weight:640; font-size:13px}
+  .asg-item .as{font-size:11.5px; color:var(--text-3)}
+  .asg-item .acol{margin-left:auto; font-size:11px; color:var(--text-3);
+    font-variant-numeric:tabular-nums}
 
   /* ---------- warnings ---------- */
   .warns{display:flex; flex-direction:column; gap:9px}
@@ -387,6 +408,9 @@
   .htab .nm .nm-txt:hover{text-decoration:underline dotted var(--text-3); text-underline-offset:3px}
   .htab .fil{cursor:text}
   .htab .fil:hover{text-decoration:underline dotted var(--text-3); text-underline-offset:3px}
+  /* a print that never got an end time: the runaway duration is the symptom */
+  .htab .dur{cursor:text; color:var(--warn)}
+  .htab .dur:hover{text-decoration:underline dotted var(--warn); text-underline-offset:3px}
   .htab .nm .orig{font-weight:400; color:var(--text-3); font-size:11.5px; margin-left:6px}
   .htab .nm .mw-h{flex:none; color:var(--accent); text-decoration:none; font-weight:700; font-size:13px}
   .htab .nm .mw-h:hover{text-decoration:underline}
@@ -398,10 +422,26 @@
   .htab tr:hover .del-btn, .htab .del-btn:focus-visible{opacity:1}
   .htab .del-btn:hover{color:var(--danger); background:rgba(239,68,68,.12)}
   @media(hover:none){ .htab .del-btn{opacity:.6} }
+  #histHead{flex-wrap:wrap; row-gap:8px; align-items:center}
+  /* labelled break between the two blocks in "Groups first" */
+  .htab tr.divider td{padding:16px 12px 7px; border-top:0;
+    font-size:10.5px; font-weight:700; letter-spacing:.07em; text-transform:uppercase;
+    color:var(--text-3)}
+  .htab tr.divider:first-child td{padding-top:4px}
   /* manual grouping: selection column, action bar, grouped rows */
   .htab .sel{width:1%; padding-right:8px}
+  .htab .sel-wrap{display:flex; align-items:center; gap:6px}
   .htab .sel input{width:15px; height:15px; accent-color:var(--accent); cursor:pointer;
-    display:block}
+    display:block; flex:none}
+  .drag-h{cursor:grab; color:var(--text-3); font-size:13px; line-height:1; user-select:none;
+    opacity:0; transition:opacity .15s ease, color .15s ease}
+  .htab tr:hover .drag-h{opacity:1}
+  .drag-h:hover{color:var(--accent)}
+  .drag-h:active{cursor:grabbing}
+  @media(hover:none){ .drag-h{display:none} }   /* no HTML5 DnD on touch anyway */
+  .htab tr.dragging td{opacity:.4}
+  .htab tr.drop-into td{background:var(--accent-soft);
+    box-shadow:inset 0 1px 0 var(--accent), inset 0 -1px 0 var(--accent)}
   .htab tr.picked td{background:var(--accent-soft)}
   .htab tr.in-grp td:first-child{border-left:2px solid var(--accent)}
   .selbar{display:none; align-items:center; gap:9px; flex-wrap:wrap; margin-bottom:12px;
@@ -432,6 +472,12 @@
 
   /* ---------- filament page ---------- */
   .htab .fname{display:flex; align-items:center; gap:10px; max-width:300px}
+  .htab .ven{white-space:nowrap; color:var(--text-2)}
+  .htab .edit{cursor:text}
+  .htab .edit:hover{text-decoration:underline dotted var(--text-3); text-underline-offset:3px}
+  .unset{color:var(--text-3); font-style:italic}
+  .cell-edit{display:flex; flex-direction:column; gap:5px; min-width:150px}
+  .cell-edit .nm-input{min-width:0}
   /* ring, not a filled dot: white filament has to stay visible on a light card */
   .swatch{flex:none; width:20px; height:20px; border-radius:50%; background:var(--sw,#888);
     box-shadow:inset 0 0 0 1px rgba(127,127,127,.45)}
@@ -490,6 +536,58 @@
   .htab .shr{width:110px}
   .htab .shr .mt{display:block; height:7px; border-radius:4px; background:var(--surface-2); overflow:hidden}
   .htab .shr .mt>span{display:block; height:100%; background:var(--accent); border-radius:4px}
+
+  /* ---------- notes ---------- */
+  .note-new{display:flex; flex-direction:column; gap:9px; margin-bottom:16px}
+  .note-title-in{font:inherit; font-size:14px; font-weight:640; width:100%;
+    padding:9px 12px; border-radius:11px; border:1px solid var(--border-strong);
+    background:var(--surface-2); color:var(--text); outline:none}
+  .note-title-in:focus{border-color:var(--accent)}
+  .note-row{display:flex; gap:9px; flex-wrap:wrap}
+  .note-row .note-title-in{flex:1 1 220px; min-width:0}
+  .note-row .note-cat-in{flex:0 1 190px; font-weight:550}
+  .note-cats{display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px}
+  .note-cats:empty{display:none}
+  .note-cats button{font:inherit; font-size:12px; font-weight:600; color:var(--text-2);
+    background:var(--surface); border:1px solid var(--border); border-radius:999px;
+    padding:5px 12px; cursor:pointer; transition:.15s}
+  .note-cats button:hover{border-color:var(--border-strong); color:var(--text)}
+  .note-cats button.on{background:var(--accent); color:#fff; border-color:transparent;
+    box-shadow:var(--shadow)}
+  .note-cats .cnt{opacity:.6; margin-left:6px; font-variant-numeric:tabular-nums}
+  .note-cat{font-size:10px; font-weight:700; letter-spacing:.05em; text-transform:uppercase;
+    color:var(--accent); background:var(--accent-soft); padding:2px 7px; border-radius:5px;
+    white-space:nowrap}
+  .notes{display:flex; flex-direction:column; gap:11px}
+  .note{border:1px solid var(--border); border-radius:14px; padding:14px 15px;
+    background:var(--surface-2)}
+  .note.editing{border-color:var(--accent); background:var(--accent-soft)}
+  .note-head{display:flex; align-items:baseline; gap:10px; margin-bottom:6px}
+  .note-h{font-size:14px; font-weight:680}
+  .note-when{font-size:11px; color:var(--text-3); white-space:nowrap}
+  .note-acts{margin-left:auto; display:flex; gap:4px; opacity:0; transition:opacity .15s ease}
+  .note:hover .note-acts, .note:focus-within .note-acts{opacity:1}
+  @media(hover:none){ .note-acts{opacity:1} }
+  /* pre-wrap keeps the user's own line breaks without turning them into markup */
+  .note-body{font-size:13px; line-height:1.6; color:var(--text-2); white-space:pre-wrap;
+    word-break:break-word}
+  .note-body a{color:var(--accent); text-decoration:none}
+  .note-body a:hover{text-decoration:underline}
+  .note-body a.yt::before{content:"▶"; font-size:9px; margin-right:5px;
+    vertical-align:1px; color:var(--danger)}
+  .note-pics{display:flex; flex-wrap:wrap; gap:8px; margin-top:10px}
+  .note-pics:empty{display:none}
+  .note-pic{position:relative; line-height:0}
+  .note-pic img{height:104px; width:auto; max-width:210px; object-fit:cover;
+    border-radius:10px; border:1px solid var(--border); background:var(--surface-2);
+    cursor:zoom-in; display:block}
+  .note-pic .pic-x{position:absolute; top:4px; right:4px; width:20px; height:20px;
+    border:0; border-radius:50%; cursor:pointer; font-size:11px; line-height:1;
+    color:#fff; background:rgba(0,0,0,.55); display:grid; place-items:center;
+    opacity:0; transition:opacity .15s ease}
+  .note-pic:hover .pic-x{opacity:1}
+  .note-pic .pic-x:hover{background:var(--danger)}
+  @media(hover:none){ .note-pic .pic-x{opacity:.8} }
 
   /* ---------- statistics ---------- */
   .kpis{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:18px}
@@ -603,6 +701,7 @@
       <button data-tab="stats" data-i18n="Statistics">Statistics</button>
       <button data-tab="filament" data-i18n="Filament">Filament</button>
       <button data-tab="maintenance" data-i18n="Maintenance">Maintenance</button>
+      <button data-tab="notes" data-i18n="Notes">Notes</button>
       <button data-tab="live" id="liveTabBtn" data-i18n="Live" style="display:none">Live</button>
     </nav>
     <div class="hgap"></div>
@@ -729,8 +828,8 @@
       <h3 style="margin:0;font-size:12px;font-weight:650;letter-spacing:.08em;text-transform:uppercase;color:var(--text-3)" data-i18n="Temperatures">Temperatures</h3>
       <span id="recPaused" style="display:none;font-size:12px;color:var(--warn);font-weight:600">⏸ paused</span>
       <div class="ranges" id="ranges" style="margin-left:auto">
-        <button data-h="1">1h</button>
-        <button data-h="6" class="on">6h</button>
+        <button data-h="1" class="on">1h</button>
+        <button data-h="6">6h</button>
         <button data-h="24">24h</button>
       </div>
     </div>
@@ -751,8 +850,8 @@
   <section class="card span-6" id="powerCard" style="display:none">
     <div class="card-head"><h3 data-i18n="Power draw">Power draw</h3><span class="meta" id="powerMeta"></span>
       <div class="ranges" id="pranges" style="margin-left:auto">
-        <button data-h="1">1h</button>
-        <button data-h="6" class="on">6h</button>
+        <button data-h="1" class="on">1h</button>
+        <button data-h="6">6h</button>
         <button data-h="24">24h</button>
       </div>
     </div>
@@ -818,9 +917,15 @@
   <!-- ============ TAB 3: print history ============ -->
   <div class="dash tab-panel" id="tab-history">
     <section class="card span-12">
-      <div class="card-head">
+      <div class="card-head" id="histHead">
         <h3 data-i18n="Print history">Print history</h3><span class="meta" id="histMeta"></span>
-        <button class="wbtn" id="histBtn" data-i18n="Refresh" style="margin-left:auto">Refresh</button>
+        <span class="seg" id="histViewSeg" style="margin-left:auto">
+          <button data-v="timeline" data-i18n="Timeline">Timeline</button>
+          <button data-v="groupsfirst" data-i18n="Groups first">Groups first</button>
+          <button data-v="groupsonly" data-i18n="Only groups">Only groups</button>
+          <button data-v="singlesonly" data-i18n="Only singles">Only singles</button>
+        </span>
+        <button class="wbtn" id="histBtn" data-i18n="Refresh">Refresh</button>
       </div>
       <div class="selbar" id="histSelBar">
         <span id="histSelCount"></span>
@@ -918,6 +1023,36 @@
     </section>
   </div><!-- /tab-maintenance -->
 
+  <!-- ============ TAB: notes ============ -->
+  <div class="dash tab-panel" id="tab-notes">
+    <section class="card span-12">
+      <div class="card-head">
+        <h3 data-i18n="Notes">Notes</h3><span class="meta" id="noteMeta"></span>
+      </div>
+      <div class="note-new">
+        <div class="note-row">
+          <input id="noteTitle" class="note-title-in" maxlength="200"
+                 data-i18n-ph="Title (optional)">
+          <input id="noteCat" class="note-title-in note-cat-in" maxlength="60"
+                 list="dlNoteCat" data-i18n-ph="Category">
+          <datalist id="dlNoteCat"></datalist>
+        </div>
+        <textarea id="noteBody" class="buy-paste" rows="3"
+               data-i18n-ph="Anything you want to keep: notes, links, YouTube videos…"></textarea>
+        <div class="buy-actions">
+          <button class="wbtn" id="noteSave" data-i18n="Add note">Add note</button>
+          <label class="wbtn" for="notePic" data-i18n="Add picture">Add picture</label>
+          <input type="file" id="notePic" accept="image/*" multiple hidden>
+          <button class="wbtn" id="noteCancel" style="display:none" data-i18n="Cancel">Cancel</button>
+          <span class="meta" id="noteHint"></span>
+        </div>
+        <div class="note-pics" id="notePending"></div>
+      </div>
+      <div class="note-cats" id="noteCats"></div>
+      <div class="notes" id="noteList"></div>
+    </section>
+  </div><!-- /tab-notes -->
+
   <div class="dash tab-panel" id="tab-live">
     <section class="card span-12">
       <div class="card-head" id="liveHead">
@@ -926,6 +1061,7 @@
         <!-- repeated from the overview hero so the camera can be watched without
              switching tabs to see how far along the print is -->
         <div class="head-stats">
+          <span class="hs"><span class="hs-label" data-i18n="Layer">Layer</span><span class="hs-val" id="liveLayers">—</span></span>
           <span class="hs"><span class="hs-label" data-i18n="Remaining">Remaining</span><span class="hs-val" id="liveEta">—</span></span>
           <span class="hs"><span class="hs-label" data-i18n="Ends">Ends</span><span class="hs-val" id="liveEnd">—</span></span>
         </div>
@@ -941,6 +1077,18 @@
 
 <!-- transient confirmation, bottom centre; aria-live so it is announced too -->
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<!-- slot assignment picker -->
+<div class="modal" id="asgModal" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="asgTitle">
+    <div class="card-head"><h3 id="asgTitle" data-i18n="What is in this slot?">What is in this slot?</h3>
+      <span class="meta" id="asgSlot"></span>
+      <button class="wbtn" id="asgClose" style="margin-left:auto" data-i18n="Cancel">Cancel</button>
+    </div>
+    <div class="asg-list" id="asgList"></div>
+    <div class="mnt-note" data-i18n="This only tells the printer what you loaded — it does not move any filament. The AMS cannot read third-party spools, so this is how they get a material and a colour.">This only tells the printer what you loaded — it does not move any filament. The AMS cannot read third-party spools, so this is how they get a material and a colour.</div>
+  </div>
+</div>
 
 <script>
 const $ = id => document.getElementById(id);
@@ -1014,6 +1162,45 @@ const DE = {
   "Status":"Status", "Slot":"Fach", "external":"extern", "third-party":"Fremdhersteller",
   "Different filaments":"Verschiedene Filamente", "Prints with data":"Drucke mit Daten",
   "filaments":"Filamente", "in the AMS":"im AMS",
+  "assign":"zuweisen", "tell the printer what is in this slot":
+    "dem Drucker mitteilen, was in diesem Fach ist",
+  "What is in this slot?":"Was ist in diesem Fach?",
+  "Loading…":"Lade…", "Could not load filaments.":"Filamente konnten nicht geladen werden.",
+  "No named filaments yet — name one on this page first.":
+    "Noch keine benannten Filamente – hier zuerst eines benennen.",
+  "Could not set the slot.":"Das Fach konnte nicht gesetzt werden.",
+  "This only tells the printer what you loaded — it does not move any filament. The AMS cannot read third-party spools, so this is how they get a material and a colour.":
+    "Das teilt dem Drucker nur mit, was eingelegt ist – es bewegt kein Filament. Das AMS kann Fremdspulen nicht lesen, so bekommen sie Material und Farbe.",
+  // notes
+  "Notes":"Notizen", "note":"Notiz", "notes":"Notizen",
+  "Title (optional)":"Titel (optional)",
+  "Anything you want to keep: notes, links, YouTube videos…":
+    "Alles, was du behalten willst: Notizen, Links, YouTube-Videos…",
+  "Add note":"Notiz hinzufügen", "Save note":"Notiz speichern",
+  "Note added":"Notiz hinzugefügt", "Note saved":"Notiz gespeichert",
+  "Note deleted":"Notiz gelöscht", "Delete this note?":"Diese Notiz löschen?",
+  "editing an existing note":"bestehende Notiz wird bearbeitet",
+  "Write something first.":"Bitte zuerst etwas schreiben.",
+  "Could not save the note.":"Die Notiz konnte nicht gespeichert werden.",
+  "Could not delete the note.":"Die Notiz konnte nicht gelöscht werden.",
+  "No notes yet — write the first one above.":
+    "Noch keine Notizen – oben die erste schreiben.",
+  "edited":"bearbeitet", "edit":"bearbeiten", "delete":"löschen",
+  // note categories - suggestions only; whatever you type is a category
+  "Category":"Kategorie", "All":"Alle", "Other":"Sonstiges", "of":"von",
+  "General":"Allgemein", "Tips & Tricks":"Tipps & Tricks", "Settings":"Einstellungen",
+  "Troubleshooting":"Fehlersuche", "Models & Ideas":"Modelle & Ideen",
+  "Nothing in this category.":"Nichts in dieser Kategorie.",
+  "Add picture":"Bild hinzufügen", "remove":"entfernen",
+  "delete picture":"Bild löschen", "Delete this picture?":"Dieses Bild löschen?",
+  "That is not an image.":"Das ist kein Bild.",
+  "That image is too large.":"Das Bild ist zu groß.",
+  "picture(s) could not be uploaded":"Bild(er) konnten nicht hochgeladen werden",
+  "Vendor":"Hersteller", "unknown":"unbekannt",
+  "click to set the vendor":"klicken, um den Hersteller zu setzen",
+  "click to name this filament":"klicken, um das Filament zu benennen",
+  "e.g. Sunlu":"z. B. Sunlu", "e.g. PLA Matte":"z. B. PLA Matte", "e.g. Grey":"z. B. Grau",
+  "Could not save the name.":"Der Name konnte nicht gespeichert werden.",
   "Bought":"Gekauft", "Left":"Übrig", "Spent":"Ausgegeben",
   "actually paid":"tatsächlich bezahlt",
   "more used than bought — older orders are missing from the log":
@@ -1119,7 +1306,24 @@ const DE = {
     "Noch keine Drucke aufgezeichnet – der erste erscheint hier, sobald er startet.",
   "click to rename":"zum Umbenennen klicken", "slicer profile":"Slicer-Profil",
   "click to override grams":"Gramm manuell überschreiben",
+  "never finished — click to set how long it took":
+    "nie beendet – klicken, um die Dauer einzutragen",
+  "e.g. 5h 20m":"z. B. 5h 20m",
+  "Could not read that duration — try 5h 20m or 320":
+    "Dauer nicht verstanden – z. B. 5h 20m oder 320",
+  "Could not close this print.":"Der Druck konnte nicht abgeschlossen werden.",
+  "Print closed":"Druck abgeschlossen",
+  "Cloud refresh failed":"Cloud-Aktualisierung fehlgeschlagen",
+  "Cloud had nothing new":"Cloud hatte nichts Neues",
+  "print updated":"Druck aktualisiert", "prints updated":"Drucke aktualisiert",
   "custom name":"eigener Name", "grams":"Gramm",
+  // history views
+  "Timeline":"Zeitachse", "Groups first":"Gruppen zuerst",
+  "Only groups":"Nur Gruppen", "Only singles":"Nur Einzelne",
+  "Single prints":"Einzelne Drucke",
+  "No grouped prints yet — select some and press Group.":
+    "Noch keine Gruppen – Drucke auswählen und auf Gruppieren klicken.",
+  "Every print belongs to a group.":"Jeder Druck gehört zu einer Gruppe.",
   // manual grouping of prints
   "Group…":"Gruppieren…", "Ungroup":"Gruppierung aufheben",
   "Clear selection":"Auswahl aufheben", "select this print":"diesen Druck auswählen",
@@ -1128,6 +1332,9 @@ const DE = {
   "A group needs a name.":"Eine Gruppe braucht einen Namen.",
   "Grouped as":"Gruppiert als", "Ungrouped":"Gruppierung aufgehoben",
   "Group renamed":"Gruppe umbenannt", "rename group":"Gruppe umbenennen",
+  "drag onto a group to add it":"auf eine Gruppe ziehen zum Hinzufügen",
+  "click to fold · drop prints here to add them":
+    "klicken zum Ein-/Ausklappen · Drucke hierher ziehen zum Hinzufügen",
   "Could not change the group.":"Die Gruppe konnte nicht geändert werden.",
   "print":"Druck",
   "delete this print":"diesen Druck löschen",
@@ -1255,6 +1462,18 @@ function setTemp(prefix, cur, target, scaleMax){
 }
 
 /* ---------- main render ---------- */
+// What is loaded where, condensed. Slot position is part of it, so moving a
+// spool from the external holder into a tray counts as a change.
+let filAmsSig = null;
+function amsSignature(s){
+  const ams = s.ams || {}, parts = [];
+  for(const u of (ams.units||[]))
+    for(const tr of (u.trays||[]))
+      parts.push(`${tr.id}:${tr.type||""}:${tr.color||""}:${tr.remain_pct}`);
+  for(const tr of (ams.external||[]))
+    parts.push(`E:${tr.type||""}:${tr.color||""}`);
+  return parts.join("|");
+}
 function render(s){
   if(!s || !s.job) return;
   lastState = s;   // so the language switcher can re-render without new telemetry
@@ -1302,11 +1521,13 @@ function render(s){
   } else {
     mw.removeAttribute("href"); mw.style.display = "none";
   }
-  $("layers").textContent = (j.layer!=null && j.total_layers) ? j.layer+" / "+j.total_layers : "—";
   // computed once and shown in two places: the hero and the Live view tab
+  const layerTxt = (j.layer!=null && j.total_layers) ? j.layer+" / "+j.total_layers : "—";
   const etaTxt = fmtEta(j.remaining_min), endTxt = fmtEnd(j.remaining_min);
+  $("layers").textContent = layerTxt;
   $("eta").textContent = etaTxt;
   $("endTime").textContent = endTxt;
+  $("liveLayers").textContent = layerTxt;
   $("liveEta").textContent = etaTxt;
   $("liveEnd").textContent = endTxt;
   $("spd").textContent = s.speed ? (s.speed.magnitude_pct!=null ? s.speed.magnitude_pct+"%" : "—") : "—";
@@ -1460,6 +1681,16 @@ function render(s){
     aiItem("Plate marker", ai.buildplate_marker) + aiItem("Monitoring", ai.monitoring) +
     aiItem("Auto-halt", ai.auto_halt);
 
+  // The Filament tab is fetched, not pushed - so when what sits in the AMS
+  // changes (a spool moved, swapped, or ran down a percent) and that tab is
+  // open, re-fetch it. Keyed on a cheap signature so an unchanged AMS costs
+  // nothing, and only while the tab is actually visible.
+  const sig = amsSignature(s);
+  if(sig !== filAmsSig){
+    filAmsSig = sig;
+    if($("tab-filament").classList.contains("on")) loadFilaments();
+  }
+
   // AMS spools
   const units=(s.ams&&s.ams.units)||[];
   if(units.length && units[0].trays && units[0].trays.length){
@@ -1502,7 +1733,10 @@ function render(s){
           ${left ? `<div class="spool-left">${left} ${t("left")}</div>` : ""}
           <div class="spool-tags">${
             active===tr.id && !tr._ext ? `<span class="tag">${t("Loaded")}</span>` : ''}${
-            tr.low ? `<span class="tag tag-low">${t("Low")}</span>` : ''}${reorder}</div>
+            tr.low ? `<span class="tag tag-low">${t("Low")}</span>` : ''}${reorder}${
+            tr._ext || tr.id==null || !(s.ams&&s.ams.can_assign) ? "" : `<button class="assign-btn" type="button"
+              data-slot="${tr.id+1}" title="${t("tell the printer what is in this slot")}"
+              >${t("assign")}</button>`}</div>
         </div>
       </div>`;
     }).join("");
@@ -1556,7 +1790,7 @@ const SERIES=[
 const SVGNS="http://www.w3.org/2000/svg";
 const M={t:14,r:58,b:24,l:36}, VW=900, VH=200;  // must match the svg viewBox
 // temperature and power charts keep independent ranges + data (each has its own selector)
-let tempData=[], tempHours=6, powerData=[], powerHours=6;
+let tempData=[], tempHours=1, powerData=[], powerHours=1;
 const el=(tag,a)=>{const e=document.createElementNS(SVGNS,tag); for(const k in a) e.setAttribute(k,a[k]); return e;};
 // a real temperature reading, not a corrupt/packed leftover
 const sane = v => typeof v==="number" && isFinite(v) && v > -50 && v < 1000;
@@ -1735,6 +1969,55 @@ function startEdit(cell){
   });
   inp.addEventListener("blur", ()=>finish(true));
 }
+// "5h 20m" / "5h" / "320" / "3,5h" -> minutes. Returns null on anything else,
+// so a typo can't silently stamp a wrong end time.
+function parseDur(s){
+  s = (s||"").trim().toLowerCase().replace(",", ".");
+  let m = /^(\d+(?:\.\d+)?)\s*h\s*(?:(\d+)\s*m(?:in)?)?$/.exec(s);
+  if(m) return Math.round(parseFloat(m[1])*60) + (+(m[2]||0));
+  m = /^(\d+)\s*m(?:in)?$/.exec(s);
+  if(m) return +m[1];
+  m = /^(\d+(?:\.\d+)?)$/.exec(s);       // a bare number means minutes
+  if(m) return Math.round(parseFloat(m[1]));
+  return null;
+}
+// A print with no end time was interrupted on THIS side - the printer finished
+// it, the recorder didn't. Only the user knows how long it ran.
+function startEditDur(cell){
+  if(cell.querySelector("input")) return;
+  histEditing = true;
+  const job = cell.dataset.job;
+  const inp = document.createElement("input");
+  inp.className = "nm-input";
+  inp.style.minWidth = "110px"; inp.style.textAlign = "right";
+  inp.placeholder = t("e.g. 5h 20m");
+  cell.textContent = ""; cell.appendChild(inp);
+  inp.focus();
+  let done = false;
+  const finish = async (save)=>{
+    if(done) return; done = true; histEditing = false;
+    const mins = save ? parseDur(inp.value) : null;
+    if(save && inp.value.trim() && mins == null){
+      toast(t("Could not read that duration — try 5h 20m or 320"), true);
+    } else if(mins){
+      let d = null;
+      try{
+        d = await (await fetch("/api/prints/finish", {method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({job_id: job, minutes: mins})})).json();
+      }catch(_){}
+      if(!d || !d.ok) toast(t("Could not close this print.")
+                            + (d && d.error ? " ("+t(d.error)+")" : ""), true);
+      else toast(t("Print closed"));
+    }
+    loadPrints();
+  };
+  inp.addEventListener("keydown", ev=>{
+    if(ev.key==="Enter"){ ev.preventDefault(); finish(true); }
+    else if(ev.key==="Escape"){ ev.preventDefault(); finish(false); }
+  });
+  inp.addEventListener("blur", ()=>finish(true));
+}
 function startEditFil(cell){
   if(cell.querySelector("input")) return;
   histEditing = true;
@@ -1816,6 +2099,8 @@ $("histTable").addEventListener("click", async e=>{
   if(e.target.closest("a")) return;   // MakerWorld link: let it open, don't rename
   const nm = e.target.closest("td.nm");
   if(nm){ startEdit(nm); return; }
+  const dur = e.target.closest("td.dur");
+  if(dur){ startEditDur(dur); return; }
   const fil = e.target.closest("td.fil");
   if(fil) startEditFil(fil);
 });
@@ -1864,20 +2149,48 @@ async function loadPrints(){
     tb.innerHTML = `<tr><td style="color:var(--text-3);padding:10px 0">${t("No prints recorded yet — the first one appears here as soon as it starts.")}</td></tr>`;
     $("histMeta").textContent=""; syncHistSel(); return;
   }
+  // Timeline keeps everything in date order; the other views split grouped from
+  // single prints, which is what makes a long history readable once most of it
+  // belongs to a project.
+  const all = groupPrints(rows);
+  const groups = all.filter(i=> i.group), singles = all.filter(i=> i.row);
+  let items;
+  if(histView === "groupsonly")        items = groups;
+  else if(histView === "singlesonly")  items = singles;
+  else if(histView === "groupsfirst")  items = groups.length && singles.length
+      ? [...groups, {divider: t("Single prints"), n: singles.length}, ...singles]
+      : [...groups, ...singles];
+  else                                 items = all;
+
+  // the summary counts what is on screen, not what exists - anything else is a
+  // number that quietly contradicts the table under it
+  const shown = items.flatMap(i=> i.group ? i.rows : (i.row ? [i.row] : []));
   let totWh=0, totCost=0;
-  for(const r of rows){ totWh += r.energy_wh||0; totCost += (r.total_cost ?? r.cost) || 0; }
+  for(const r of shown){ totWh += r.energy_wh||0; totCost += (r.total_cost ?? r.cost) || 0; }
   $("histMeta").textContent =
-    `${rows.length} ${t("prints")} · ${(totWh/1000).toFixed(2)} kWh · ${cur} ${ceil2(totCost).toFixed(2)} ${t("total")}`;
-  const items = groupPrints(rows);
+    (shown.length === rows.length ? `${rows.length} ${t("prints")}`
+                                  : `${shown.length} ${t("of")} ${rows.length} ${t("prints")}`)
+    + ` · ${(totWh/1000).toFixed(2)} kWh · ${cur} ${ceil2(totCost).toFixed(2)} ${t("total")}`;
+  if(!items.length){
+    tb.innerHTML = `<tr><td style="color:var(--text-3);padding:10px 0">${
+      t(histView === "groupsonly" ? "No grouped prints yet — select some and press Group."
+                                  : "Every print belongs to a group.")}</td></tr>`;
+    syncHistSel(); return;
+  }
   tb.innerHTML =
     `<tr><th class="sel"></th><th>${t("Started")}</th><th>${t("Job")}</th><th>${t("Result")}</th>
          <th class="num">${t("Layers")}</th><th class="num">${t("Duration")}</th>
          <th class="num">${t("Energy")}</th><th class="num">${t("Power")}&nbsp;€</th>
          <th class="num">${t("Filament")}</th><th class="num">${t("Filament")}&nbsp;€</th>
          <th class="num">${t("Total")}</th><th class="del"></th></tr>` +
-    items.map(it=> it.group ? groupHead(it, cur) + (histOpen.has(it.group)
-                     ? it.rows.map(r=> printRow(r, cur)).join("") : "")
-                            : printRow(it.row, cur)).join("");
+    items.map(it=>{
+      if(it.divider)
+        return `<tr class="divider"><td colspan="12">${esc(it.divider)} (${it.n})</td></tr>`;
+      if(it.group)
+        return groupHead(it, cur)
+             + (histOpen.has(it.group) ? it.rows.map(r=> printRow(r, cur)).join("") : "");
+      return printRow(it.row, cur);
+    }).join("");
   syncHistSel();
 }
 // One model is often several prints. Grouped rows fold under a named header that
@@ -1913,7 +2226,8 @@ function groupHead(g, cur){
   }
   const shut = !histOpen.has(g.group);
   const h = Math.floor(secs/3600), m = Math.round((secs%3600)/60);
-  return `<tr class="grp${shut?" closed":""}" data-grp="${esc(g.group)}">
+  return `<tr class="grp${shut?" closed":""}" data-grp="${esc(g.group)}"
+      title="${t("click to fold · drop prints here to add them")}">
     <td colspan="12"><div class="grp-row">
       <span class="grp-caret">▾</span>
       <span class="grp-name">${esc(g.group)}</span>
@@ -1938,9 +2252,16 @@ function printRow(r, cur){
       const d0 = r.started_at ? new Date(r.started_at*1000) : null;
       const when = d0 ? d0.toLocaleString([], {year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}) : "—";
       const running = !r.ended_at;
-      return `<tr${r.pgroup ? ' class="in-grp"' : ""}>
-        <td class="sel"><input type="checkbox" data-job="${esc(r.job_id)}"
-            aria-label="${t("select this print")}"></td>
+      return `<tr data-job="${esc(r.job_id)}"${
+              r.pgroup ? ` class="in-grp" data-grp="${esc(r.pgroup)}"` : ""}>
+        <td class="sel"><div class="sel-wrap">
+          <input type="checkbox" data-job="${esc(r.job_id)}"
+            aria-label="${t("select this print")}">
+          <!-- only the handle drags, so cell text and the rename editor stay
+               selectable; the whole row being draggable breaks both -->
+          <span class="drag-h" draggable="true" data-job="${esc(r.job_id)}"
+            title="${t("drag onto a group to add it")}">⠿</span>
+        </div></td>
         <td style="color:var(--text-2);white-space:nowrap">${when}</td>
         <td class="nm" data-job="${r.job_id}" data-label="${esc(r.label)}" data-name="${esc(auto)}"
             title="${t("click to rename")}${r.name?" · "+t("slicer profile")+": "+esc(r.name):""}"><div class="nm-wrap"><span class="nm-txt">${
@@ -1952,7 +2273,9 @@ function printRow(r, cur){
               running ? t("running") : t(FINAL_LABEL[r.final_state] || r.final_state || "—")}</span>${
               r.error_code?`<div class="err-sub">${esc(r.error_code)}</div>`:""}</td>
         <td class="num">${r.total_layers ?? "—"}</td>
-        <td class="num">${fmtDur(r.started_at, r.ended_at)}</td>
+        <td class="num${running ? " dur" : ""}" ${running
+            ? `data-job="${esc(r.job_id)}" title="${t("never finished — click to set how long it took")}"` : ""}>${
+          fmtDur(r.started_at, r.ended_at)}</td>
         <td class="num">${r.energy_wh!=null ? r.energy_wh.toFixed(0)+" Wh" : "—"}</td>
         <td class="num">${money(r.cost, cur)}</td>
         <td class="num fil" data-job="${r.job_id}" data-g="${r.filament_g_manual ?? ""}"
@@ -1970,7 +2293,16 @@ function printRow(r, cur){
 /* ---------- history: selection & manual grouping ---------- */
 const histSel = new Set();   // job_ids ticked; survives the 60 s auto-refresh
 const histOpen = new Set();  // groups folded open, collapsed by default
+let histView = localStorage.getItem("bambu-histview") || "timeline";
+$("histViewSeg").addEventListener("click", e=>{
+  if(e.target.tagName !== "BUTTON") return;
+  histView = e.target.dataset.v;
+  localStorage.setItem("bambu-histview", histView);
+  loadPrints();
+});
 function syncHistSel(){
+  document.querySelectorAll("#histViewSeg button").forEach(b=>
+    b.classList.toggle("on", b.dataset.v === histView));
   document.querySelectorAll('#histTable input[type=checkbox]').forEach(cb=>{
     cb.checked = histSel.has(cb.dataset.job);
     const tr = cb.closest("tr");
@@ -2025,6 +2357,60 @@ $("histUngroupBtn").addEventListener("click", async ()=>{
   }
 });
 $("histSelClear").addEventListener("click", ()=>{ histSel.clear(); syncHistSel(); });
+
+/* Drag a print onto a group to file it there. Dragging one of several selected
+   prints carries the whole selection, so a batch is one gesture too. */
+let dragJobs = null;
+function markDrop(name){
+  document.querySelectorAll("#histTable tr.drop-into").forEach(tr=>
+    tr.classList.remove("drop-into"));
+  if(name==null) return;
+  document.querySelectorAll(`#histTable tr[data-grp]`).forEach(tr=>{
+    if(tr.dataset.grp === name) tr.classList.add("drop-into");
+  });
+}
+$("histTable").addEventListener("dragstart", e=>{
+  const h = e.target.closest(".drag-h");
+  if(!h){ e.preventDefault(); return; }
+  const job = h.dataset.job;
+  dragJobs = histSel.has(job) ? [...histSel] : [job];
+  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.setData("text/plain", dragJobs.join(","));
+  const tr = h.closest("tr");
+  if(tr) tr.classList.add("dragging");
+});
+$("histTable").addEventListener("dragover", e=>{
+  if(!dragJobs) return;
+  const tgt = e.target.closest("tr.grp, tr.in-grp");
+  if(!tgt || !tgt.dataset.grp) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "move";
+  markDrop(tgt.dataset.grp);
+});
+$("histTable").addEventListener("dragend", ()=>{
+  markDrop(null); dragJobs = null;
+  document.querySelectorAll("#histTable tr.dragging").forEach(tr=>
+    tr.classList.remove("dragging"));
+});
+$("histTable").addEventListener("drop", async e=>{
+  if(!dragJobs) return;
+  const tgt = e.target.closest("tr.grp, tr.in-grp");
+  const name = tgt && tgt.dataset.grp;
+  if(!name) return;
+  e.preventDefault();
+  // prints already in that group are a no-op, not an error
+  const already = new Set((lastPrints||[]).filter(r=> r.pgroup === name).map(r=> r.job_id));
+  const jobs = dragJobs.filter(j=> !already.has(j));
+  const n = jobs.length;
+  markDrop(null); dragJobs = null;
+  if(!n) return;
+  if(await postGroup(jobs, name)){
+    histOpen.add(name);
+    histSel.clear();
+    toast(`${n} ${t(n===1?"print":"prints")} → ${name}`);
+    loadPrints();
+  }
+});
 $("histTable").addEventListener("change", e=>{
   const cb = e.target.closest('input[type=checkbox]');
   if(!cb) return;
@@ -2036,8 +2422,14 @@ $("histTable").addEventListener("change", e=>{
 // gets its grams immediately rather than on the next poll.
 $("histBtn").addEventListener("click", async ()=>{
   $("histBtn").textContent = "…";
-  try{ await fetch("/api/cloud/refresh", {method:"POST"}); }catch(_){}
-  $("histBtn").textContent = "Refresh";
+  let d = null;
+  try{ d = await (await fetch("/api/cloud/refresh", {method:"POST"})).json(); }catch(_){}
+  $("histBtn").textContent = t("Refresh");
+  // Say what happened. Swallowing this made a disabled cloud, an expired token
+  // and "nothing to update" all look exactly like success.
+  if(!d || !d.ok) toast(t("Cloud refresh failed") + (d && d.error ? ": "+d.error : ""), true);
+  else toast(d.updated ? `${d.updated} ${t(d.updated===1?"print updated":"prints updated")}`
+                       : t("Cloud had nothing new"));
   loadPrints();
 });
 loadPrints(); setInterval(loadPrints, 60000);
@@ -2073,6 +2465,61 @@ async function loadStats(){
     : `<div class="temp-sub">—</div>`;
 }
 
+/* ---------- tell the printer what is in a slot ----------
+   The AMS reader only understands Bambu's own tags, so a third-party spool is
+   whatever the tray was last told. Picking one of your named filaments writes
+   material + colour to the tray - which is also what keeps two different green
+   spools apart, since the identity key is built from the colour. */
+let asgSlot = null;
+function closeAssign(){ $("asgModal").hidden = true; asgSlot = null; }
+$("asgClose").addEventListener("click", closeAssign);
+$("asgModal").addEventListener("click", e=>{ if(e.target === $("asgModal")) closeAssign(); });
+document.addEventListener("keydown", e=>{
+  if(e.key === "Escape" && !$("asgModal").hidden) closeAssign();
+});
+async function openAssign(slot){
+  asgSlot = slot;
+  $("asgSlot").textContent = t("Slot") + " " + slot;
+  $("asgList").innerHTML = `<div class="temp-sub">${t("Loading…")}</div>`;
+  $("asgModal").hidden = false;
+  let d;
+  try{ d = await (await fetch("/api/filaments")).json(); }
+  catch(_){ $("asgList").innerHTML = `<div class="temp-sub">${t("Could not load filaments.")}</div>`; return; }
+  // only identities the printer can actually be told about: a material and a
+  // colour are the two fields the command cannot do without
+  const rows = (d.filaments||[]).filter(f=> f.editable && f.type && f.color);
+  if(!rows.length){
+    $("asgList").innerHTML = `<div class="temp-sub">${t("No named filaments yet — name one on this page first.")}</div>`;
+    return;
+  }
+  $("asgList").innerHTML = rows.map(f=>{
+    const n = filName(f);
+    return `<button class="asg-item" type="button" data-fkey="${esc(f.fkey)}">
+      <span class="swatch" style="--sw:#${esc(f.color)}"></span>
+      <span><span class="an">${esc(f.vendor ? f.vendor+" · " : "")}${n.main}</span><br>
+        <span class="as">${n.sub} · ${esc(f.type)}</span></span>
+      <span class="acol">#${esc(f.color)}</span></button>`;
+  }).join("");
+}
+$("asgList").addEventListener("click", async e=>{
+  const b = e.target.closest(".asg-item");
+  if(!b || asgSlot == null) return;
+  const slot = asgSlot;
+  closeAssign();
+  let d = null;
+  try{
+    d = await (await fetch("/api/ams/filament", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({slot, fkey: b.dataset.fkey})})).json();
+  }catch(_){}
+  if(!d || !d.ok) toast(t("Could not set the slot.") + (d && d.error ? " ("+d.error+")" : ""), true);
+  else toast(`${t("Slot")} ${slot} → ${d.type} #${d.color}`);
+});
+$("spools").addEventListener("click", e=>{
+  const b = e.target.closest(".assign-btn");
+  if(b) openAssign(+b.dataset.slot);
+});
+
 /* ---------- filament ---------- */
 // Name a filament as precisely as the data allows: product line + colour name
 // for an RFID spool, down to bare material + hex for one the AMS never saw.
@@ -2090,6 +2537,67 @@ function filStatus(f){
   return `<span class="tag${f.low?' tag-low':''}">${where}</span>`
        + `<span style="color:var(--text-2)">${rem}</span>`;
 }
+/* Naming a filament. A third-party spool arrives as "PLA #D3D672" and nothing
+   in the data can do better - the printer reports a borrowed Bambu profile and
+   a colour, never a manufacturer. Naming it here is also what lets purchases
+   find it, wording being the only route without a colour code. */
+async function saveIdentity(fkey, fields){
+  let d = null;
+  try{
+    d = await (await fetch("/api/filaments/identity", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({fkey, ...fields})})).json();
+  }catch(_){}
+  if(!d || !d.ok){
+    toast(t("Could not save the name.") + (d && d.error ? " ("+d.error+")" : ""), true);
+    return false;
+  }
+  return true;
+}
+function editCell(cell, inputs, onSave){
+  if(cell.querySelector("input")) return;
+  const html = inputs.map(i=>
+    `<input data-k="${i.k}" class="nm-input" placeholder="${esc(i.ph)}" value="${esc(i.v||"")}">`).join("");
+  cell.dataset.prev = cell.innerHTML;
+  cell.innerHTML = `<div class="cell-edit">${html}</div>`;
+  const first = cell.querySelector("input");
+  first.focus(); first.select();
+  let done = false;
+  const finish = async (save)=>{
+    if(done) return; done = true;
+    if(!save){ cell.innerHTML = cell.dataset.prev; return; }
+    const vals = {};
+    cell.querySelectorAll("input").forEach(i=> vals[i.dataset.k] = i.value.trim());
+    if(await onSave(vals)) loadFilaments();
+    else cell.innerHTML = cell.dataset.prev;
+  };
+  cell.querySelectorAll("input").forEach(inp=>{
+    inp.addEventListener("keydown", ev=>{
+      if(ev.key==="Enter"){ ev.preventDefault(); finish(true); }
+      else if(ev.key==="Escape"){ ev.preventDefault(); finish(false); }
+    });
+    // only leave the editor once focus has left the whole cell, so tabbing
+    // between product and colour doesn't save half an edit
+    inp.addEventListener("blur", ()=> setTimeout(()=>{
+      if(!cell.contains(document.activeElement)) finish(true);
+    }, 0));
+  });
+}
+$("filTable").addEventListener("click", e=>{
+  const ven = e.target.closest("td.ven.edit");
+  if(ven){
+    editCell(ven, [{k:"vendor", ph:t("e.g. Sunlu"), v:ven.dataset.vendor}],
+             v=> saveIdentity(ven.dataset.fkey, {vendor: v.vendor}));
+    return;
+  }
+  const nm = e.target.closest("td.fname.edit");
+  if(nm){
+    editCell(nm, [{k:"product", ph:t("e.g. PLA Matte"), v:nm.dataset.product},
+                  {k:"color_name", ph:t("e.g. Grey"), v:nm.dataset.colour}],
+             v=> saveIdentity(nm.dataset.fkey,
+                              {product: v.product, color_name: v.color_name}));
+  }
+});
 async function loadFilaments(){
   let d;
   try{ d = await (await fetch("/api/filaments")).json(); }catch(_){ return; }
@@ -2111,7 +2619,7 @@ async function loadFilaments(){
   const loaded = rows.filter(f=>f.loaded).length;
   $("filMeta").textContent = `${rows.length} ${t("filaments")} · ${loaded} ${t("in the AMS")}`;
   tb.innerHTML =
-    `<tr><th>${t("Filament")}</th><th>${t("Type")}</th>
+    `<tr><th>${t("Vendor")}</th><th>${t("Filament")}</th><th>${t("Type")}</th>
          <th class="num">${t("Used")}</th><th>${t("Share")}</th>
          <th class="num">${t("Bought")}</th><th class="num">${t("Left")}</th>
          <th class="num">${t("Cost")}</th><th class="num">${t("Prints")}</th>
@@ -2121,8 +2629,15 @@ async function loadFilaments(){
       const last = f.last_used
         ? new Date(f.last_used*1000).toLocaleDateString([], {year:"numeric",month:"2-digit",day:"2-digit"})
         : "—";
+      const ed = f.editable ? ` data-fkey="${esc(f.fkey)}"` : "";
       return `<tr>
-        <td class="fname"><span class="swatch" style="--sw:#${esc(f.color||"888888")}"></span>
+        <td class="ven${f.editable?" edit":""}"${ed} data-vendor="${esc(f.vendor)}"${
+          f.editable?` title="${t("click to set the vendor")}"`:""}>${
+          esc(f.vendor) || (f.editable ? `<span class="unset">${t("unknown")}</span>` : "—")}</td>
+        <td class="fname${f.editable?" edit":""}"${ed}
+            data-product="${esc(f.product)}" data-colour="${esc(f.color_name)}"${
+            f.editable?` title="${t("click to name this filament")}"`:""}>
+          <span class="swatch" style="--sw:#${esc(f.color||"888888")}"></span>
           <span class="fn-txt"><b>${n.main}</b><span class="fn-sub">${n.sub}${
             f.is_bambu===false ? " · "+t("third-party") : ""}</span></span></td>
         <td style="color:var(--text-2)">${esc(f.type)||"—"}</td>
@@ -2427,6 +2942,241 @@ $("buyTable").addEventListener("click", async e=>{
   loadFilaments();
 });
 
+/* ---------- notes ---------- */
+// Escape FIRST, then turn URLs into links: the other way round would let a note
+// inject markup. Escaping leaves '&' as '&amp;' inside the href, which is exactly
+// what an HTML attribute wants, so query strings survive intact.
+const YT_RE = /(?:youtube\.com\/(?:watch\?(?:[^ ]*&amp;)?v=|shorts\/|live\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})/i;
+function linkify(text){
+  return esc(text).replace(/https?:\/\/[^\s<]+/g, url=>{
+    const clean = url.replace(/[.,;:)\]}'"]+$/, "");   // trailing punctuation isn't part of it
+    const tail = url.slice(clean.length);
+    const yt = YT_RE.test(clean);
+    let label = clean.replace(/^https?:\/\/(www\.)?/, "");
+    if(label.length > 64) label = label.slice(0, 61) + "…";
+    return `<a href="${clean}" target="_blank" rel="noopener noreferrer"${
+      yt ? ' class="yt"' : ""}>${label}</a>` + tail;
+  });
+}
+/* Pictures are shrunk in the BROWSER before upload: a phone photo is 3-8 MB and
+   would sit in the database at that size forever. Canvas does it with no server
+   dependency at all. Small PNG/WebP/GIF pass through untouched, so transparency
+   and animation survive. */
+const PIC_MAX_PX = 1400, PIC_KEEP_AS_IS = 400*1024;
+async function shrinkPicture(file){
+  if(file.size <= PIC_KEEP_AS_IS && file.type !== "image/jpeg")
+    return {blob: file, w: 0, h: 0};
+  let bmp;
+  try{ bmp = await createImageBitmap(file); }
+  catch(_){ return {blob: file, w: 0, h: 0}; }   // exotic format: send as-is
+  const scale = Math.min(1, PIC_MAX_PX / Math.max(bmp.width, bmp.height));
+  const w = Math.round(bmp.width*scale), h = Math.round(bmp.height*scale);
+  const cv = document.createElement("canvas");
+  cv.width = w; cv.height = h;
+  cv.getContext("2d").drawImage(bmp, 0, 0, w, h);
+  bmp.close && bmp.close();
+  const blob = await new Promise(r=> cv.toBlob(r, "image/jpeg", 0.82));
+  // a re-encode that came out bigger is not worth having
+  return (blob && blob.size < file.size) ? {blob, w, h} : {blob: file, w: bmp.width, h: bmp.height};
+}
+let notePending = [];     // {blob, w, h, url} not uploaded yet
+function drawPending(){
+  $("notePending").innerHTML = notePending.map((p,i)=>
+    `<span class="note-pic"><img src="${p.url}" alt="">
+       <button class="pic-x" data-i="${i}" title="${t("remove")}">✕</button></span>`).join("");
+}
+$("notePending").addEventListener("click", e=>{
+  const b = e.target.closest(".pic-x");
+  if(!b) return;
+  URL.revokeObjectURL(notePending[+b.dataset.i].url);
+  notePending.splice(+b.dataset.i, 1);
+  drawPending();
+});
+$("notePic").addEventListener("change", async e=>{
+  for(const f of [...e.target.files]){
+    if(!f.type.startsWith("image/")){ toast(t("That is not an image."), true); continue; }
+    const {blob, w, h} = await shrinkPicture(f);
+    if(blob.size > 3*1024*1024){ toast(t("That image is too large."), true); continue; }
+    notePending.push({blob, w, h, url: URL.createObjectURL(blob)});
+  }
+  e.target.value = "";
+  drawPending();
+});
+async function uploadPending(noteId){
+  let failed = 0;
+  for(const p of notePending){
+    const fd = new FormData();
+    fd.append("note_id", noteId);
+    fd.append("file", p.blob, "note.jpg");
+    fd.append("w", p.w); fd.append("h", p.h);
+    try{
+      const r = await (await fetch("/api/notes/image", {method:"POST", body: fd})).json();
+      if(!r.ok) failed++;
+    }catch(_){ failed++; }
+    URL.revokeObjectURL(p.url);
+  }
+  notePending = [];
+  drawPending();
+  if(failed) toast(`${failed} ${t("picture(s) could not be uploaded")}`, true);
+}
+/* Categories are free text on the note itself - no category table, the same call
+   as print groups: nothing to keep in step, renaming is writing a new name on
+   those notes, and a category stops existing when its last note leaves. The
+   defaults are only suggestions in the datalist; anything you type is a category. */
+const CAT_DEFAULTS = ["General", "Tips & Tricks", "Settings", "Filament",
+                      "Troubleshooting", "Models & Ideas"];
+const CAT_ALL = "all", CAT_NONE = "none";
+let noteCat = localStorage.getItem("bambu-notecat") || CAT_ALL;
+let noteEditing = null;   // id of the note the composer is currently editing
+function noteComposer(note){
+  noteEditing = note ? note.id : null;
+  $("noteTitle").value = note ? (note.title || "") : "";
+  $("noteCat").value   = note ? (note.category || "")
+                              : (noteCat !== CAT_ALL && noteCat !== CAT_NONE ? noteCat : "");
+  $("noteBody").value  = note ? (note.body || "")  : "";
+  $("noteSave").textContent = t(note ? "Save note" : "Add note");
+  $("noteCancel").style.display = note ? "" : "none";
+  $("noteHint").textContent = note ? t("editing an existing note") : "";
+  document.querySelectorAll("#noteList .note").forEach(n=>
+    n.classList.toggle("editing", !!note && +n.dataset.id === note.id));
+  $("noteTitle").focus();
+  if(note) $("noteTitle").scrollIntoView({behavior:"smooth", block:"nearest"});
+}
+$("noteCancel").addEventListener("click", ()=> noteComposer(null));
+$("noteSave").addEventListener("click", async ()=>{
+  const title = $("noteTitle").value.trim(), body = $("noteBody").value.trim();
+  if(!title && !body){ toast(t("Write something first."), true); return; }
+  let d = null;
+  try{
+    d = await (await fetch("/api/notes", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({id: noteEditing, title, body,
+                            category: $("noteCat").value.trim()})})).json();
+  }catch(_){}
+  if(!d || !d.ok){
+    toast(t("Could not save the note.") + (d && d.error ? " ("+d.error+")" : ""), true);
+    return;
+  }
+  // the note has to exist before a picture can point at it
+  if(notePending.length) await uploadPending(d.id);
+  toast(t(noteEditing ? "Note saved" : "Note added"));
+  noteComposer(null);
+  loadNotes();
+});
+// Ctrl/Cmd+Enter saves from any field - notes are a typing surface
+[$("noteTitle"), $("noteCat"), $("noteBody")].forEach(el=> el.addEventListener("keydown", e=>{
+  if(e.key === "Enter" && (e.ctrlKey || e.metaKey)){ e.preventDefault(); $("noteSave").click(); }
+  else if(e.key === "Escape" && noteEditing){ e.preventDefault(); noteComposer(null); }
+}));
+$("noteCats").addEventListener("click", e=>{
+  const b = e.target.closest("button");
+  if(!b) return;
+  noteCat = b.dataset.cat;
+  localStorage.setItem("bambu-notecat", noteCat);
+  loadNotes();
+});
+let lastNotes = [];
+async function loadNotes(){
+  let d;
+  try{ d = await (await fetch("/api/notes")).json(); }catch(_){ return; }
+  const all = lastNotes = d.notes || [];
+
+  // chips from the categories actually in use, plus "Other" when some note has
+  // none; a filter whose category has since disappeared falls back to All
+  const counts = new Map();
+  let none = 0;
+  for(const n of all){
+    if(n.category) counts.set(n.category, (counts.get(n.category)||0) + 1);
+    else none++;
+  }
+  const names = [...counts.keys()].sort((a,b)=> a.localeCompare(b));
+  if(noteCat !== CAT_ALL && noteCat !== CAT_NONE && !counts.has(noteCat)) noteCat = CAT_ALL;
+  if(noteCat === CAT_NONE && !none) noteCat = CAT_ALL;
+  const chip = (key, label, n)=>
+    `<button data-cat="${esc(key)}" class="${noteCat===key?"on":""}">${esc(label)}${
+      n!=null ? `<span class="cnt">${n}</span>` : ""}</button>`;
+  $("noteCats").innerHTML = (names.length || none)
+    ? chip(CAT_ALL, t("All"), all.length)
+      + names.map(c=> chip(c, c, counts.get(c))).join("")
+      + (none ? chip(CAT_NONE, t("Other"), none) : "")
+    : "";
+
+  // suggestions: what you already use first, then the defaults
+  const sugg = [...names, ...CAT_DEFAULTS.map(c=> t(c))]
+               .filter((c,i,a)=> a.indexOf(c) === i);
+  $("dlNoteCat").innerHTML = sugg.map(c=> `<option value="${esc(c)}">`).join("");
+
+  const rows = noteCat === CAT_ALL ? all
+             : noteCat === CAT_NONE ? all.filter(n=> !n.category)
+             : all.filter(n=> n.category === noteCat);
+  $("noteMeta").textContent = all.length
+    ? (rows.length === all.length
+        ? `${all.length} ${t(all.length===1 ? "note" : "notes")}`
+        : `${rows.length} ${t("of")} ${all.length} ${t("notes")}`)
+    : "";
+  $("noteList").innerHTML = rows.length ? rows.map(n=>{
+    const when = new Date((n.updated_at || n.created_at || 0)*1000)
+      .toLocaleString([], {year:"numeric",month:"2-digit",day:"2-digit",
+                           hour:"2-digit",minute:"2-digit"});
+    const edited = n.updated_at && n.created_at && n.updated_at - n.created_at > 60;
+    return `<div class="note" data-id="${n.id}">
+      <div class="note-head">
+        ${n.title ? `<span class="note-h">${esc(n.title)}</span>` : ""}
+        ${n.category ? `<span class="note-cat">${esc(n.category)}</span>` : ""}
+        <span class="note-when">${edited ? t("edited") + " " : ""}${when}</span>
+        <span class="note-acts">
+          <button class="gbtn" data-act="edit" title="${t("edit")}">✎</button>
+          <button class="gbtn" data-act="del" title="${t("delete")}">✕</button>
+        </span>
+      </div>
+      ${n.body ? `<div class="note-body">${linkify(n.body)}</div>` : ""}
+      ${(n.images||[]).length ? `<div class="note-pics">${n.images.map(im=>
+        `<span class="note-pic"><img src="/api/notes/image/${im.id}" alt="" loading="lazy"
+           data-full="/api/notes/image/${im.id}">
+         <button class="pic-x" data-pic="${im.id}" title="${t("delete picture")}">✕</button></span>`
+        ).join("")}</div>` : ""}
+    </div>`;
+  }).join("")
+    : `<div class="temp-sub">${t(all.length ? "Nothing in this category."
+                                            : "No notes yet — write the first one above.")}</div>`;
+}
+$("noteList").addEventListener("click", async e=>{
+  const img = e.target.closest(".note-pic img");
+  if(img){ window.open(img.dataset.full, "_blank", "noopener"); return; }
+  const px = e.target.closest(".pic-x");
+  if(px){
+    if(!confirm(t("Delete this picture?"))) return;
+    try{
+      await fetch("/api/notes/image/delete", {method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({id: +px.dataset.pic})});
+    }catch(_){}
+    loadNotes();
+    return;
+  }
+  const b = e.target.closest("button.gbtn");
+  if(!b) return;
+  const card = b.closest(".note"), id = +card.dataset.id;
+  if(b.dataset.act === "edit"){
+    noteComposer(lastNotes.find(n=> n.id === id));
+    return;
+  }
+  const n = lastNotes.find(x=> x.id === id) || {};
+  if(!confirm(t("Delete this note?") + (n.title ? "\n\n" + n.title : ""))) return;
+  let d = null;
+  try{
+    d = await (await fetch("/api/notes/delete", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({id})})).json();
+  }catch(_){}
+  if(!d || !d.ok){ toast(t("Could not delete the note."), true); }
+  else{
+    if(noteEditing === id) noteComposer(null);
+    toast(t("Note deleted"));
+  }
+  loadNotes();
+});
+
 /* ---------- maintenance ---------- */
 const maintCol = st => st==="overdue" ? "var(--danger)" : st==="soon" ? "var(--warn)" : "var(--good)";
 async function loadMaint(data){
@@ -2615,6 +3365,7 @@ function showTab(name){
   if(name === "overview"){ drawChart(); drawPowerChart(); }
   if(name === "stats"){ loadStats(); }
   if(name === "filament"){ loadFilaments(); }
+  if(name === "notes"){ loadNotes(); }
   if(name === "maintenance"){ loadMaint(); }
 }
 $("tabs").addEventListener("click", e=>{

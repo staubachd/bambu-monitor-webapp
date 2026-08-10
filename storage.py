@@ -38,6 +38,11 @@ LATE_COLUMNS = {
     # CREATE TABLE IF NOT EXISTS silently does nothing to an existing table, so
     # every column added later has to be listed here or the INSERT breaks.
     "purchases": {"code": "VARCHAR(24)", "list_price": "FLOAT"},
+    # who made it. The RFID tag only says genuine-or-not, never a manufacturer,
+    # so for third-party spools this can only come from the user.
+    "filaments": {"vendor": "VARCHAR(64)"},
+    # notes shipped before they had categories
+    "notes": {"category": "VARCHAR(60)"},
 }
 
 PRINT_COLS = ["job_id", "name", "started_at", "ended_at", "final_state",
@@ -61,8 +66,8 @@ PRINT_IMMUTABLE = {"job_id", "started_at", "label", "design_title",
 # a spool long after it has been used up and removed. Usage figures are NOT here:
 # those are aggregated from prints.filament_detail, which already has them for
 # every past print (see app._filament_stats).
-FILAMENT_COLS = ["fkey", "filament_id", "code", "product", "color", "color_name",
-                 "type", "is_bambu", "first_seen", "last_seen"]
+FILAMENT_COLS = ["fkey", "filament_id", "code", "vendor", "product", "color",
+                 "color_name", "type", "is_bambu", "first_seen", "last_seen"]
 
 # What was bought, as opposed to what was used. Kept as one row per order LINE
 # (not per spool) so an order of 3 spools stays one editable, deletable entry.
@@ -118,6 +123,7 @@ class Storage:
             )
             self.ph = "%s"
             self._auto = "AUTO_INCREMENT"
+            self._blob = "LONGBLOB"
         else:
             import sqlite3
             path = cfg.get("sqlite_path", "telemetry.db")
@@ -127,6 +133,7 @@ class Storage:
             self._connect = lambda: self._conn
             self.ph = "?"
             self._auto = "AUTOINCREMENT"
+            self._blob = "BLOB"
         self._init_schema()
 
     # sqlite reuses one connection; mariadb opens per-call (thread-safe, cheap on LAN)
@@ -167,7 +174,7 @@ class Storage:
         cur.execute(f"""
             CREATE TABLE IF NOT EXISTS filaments (
                 fkey VARCHAR(64) PRIMARY KEY,
-                filament_id VARCHAR(16), code VARCHAR(24),
+                filament_id VARCHAR(16), code VARCHAR(24), vendor VARCHAR(64),
                 product VARCHAR(64), color VARCHAR(8), color_name VARCHAR(64),
                 type VARCHAR(24), is_bambu INT,
                 first_seen DOUBLE, last_seen DOUBLE
@@ -182,6 +189,21 @@ class Storage:
                 total_price FLOAT, list_price FLOAT, currency VARCHAR(8),
                 ordered_at DOUBLE, order_ref VARCHAR(64),
                 note VARCHAR(255), created_at DOUBLE
+            )""")
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS notes (
+                id INTEGER PRIMARY KEY {self._auto},
+                title VARCHAR(200), body TEXT, category VARCHAR(60),
+                created_at DOUBLE, updated_at DOUBLE
+            )""")
+        # Pictures live in the database with the note they belong to, so one
+        # backup covers both. The browser downscales before upload, so these are
+        # a few hundred KB rather than phone-camera sized.
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS note_images (
+                id INTEGER PRIMARY KEY {self._auto},
+                note_id INT, mime VARCHAR(40), data {self._blob},
+                w INT, h INT, size INT, created_at DOUBLE
             )""")
         # skey/svalue rather than key/value - 'key' is reserved in MySQL/MariaDB
         cur.execute(f"""
@@ -394,6 +416,28 @@ class Storage:
         else:
             cur.close(); conn.close()
 
+    def set_filament_identity(self, fkey: str, **fields) -> bool:
+        """Write the user-owned identity fields of one filament.
+
+        Unlike upsert_filament this writes exactly what it is given, empty
+        included - naming something is also being able to un-name it. Only ever
+        called from the UI, so the AMS observer can keep its own rules.
+        """
+        fields = {k: v for k, v in fields.items()
+                  if k in ("vendor", "product", "color_name")}
+        if not fields:
+            return False
+        sets = ", ".join(f"{k}={self.ph}" for k in fields)
+        conn, cur = self._cursor()
+        cur.execute(f"UPDATE filaments SET {sets} WHERE fkey={self.ph}",
+                    list(fields.values()) + [fkey])
+        n = cur.rowcount
+        if self.backend == "sqlite":
+            conn.commit()
+        else:
+            cur.close(); conn.close()
+        return n > 0
+
     def set_filament_color(self, fkey: str, color_name: str) -> bool:
         """Rename one identity's colour. Used when an invoice teaches the real
         name - Bambu's own wording outranks the built-in guess table and anything
@@ -449,6 +493,105 @@ class Storage:
     def delete_purchase(self, pid: int) -> bool:
         conn, cur = self._cursor()
         cur.execute(f"DELETE FROM purchases WHERE id={self.ph}", (int(pid),))
+        n = cur.rowcount
+        if self.backend == "sqlite":
+            conn.commit()
+        else:
+            cur.close(); conn.close()
+        return n > 0
+
+    # ---- notes ----
+    def all_notes(self) -> list[dict]:
+        cols = ["id", "title", "body", "category", "created_at", "updated_at"]
+        conn, cur = self._cursor()
+        cur.execute(f"SELECT {','.join(cols)} FROM notes ORDER BY updated_at DESC")
+        rows = cur.fetchall()
+        if self.backend == "sqlite":
+            return [dict(r) for r in rows]
+        cur.close(); conn.close()
+        return [dict(zip(cols, r)) for r in rows]
+
+    def add_note(self, title: str | None, body: str | None,
+                 category: str | None = None) -> int:
+        now = time.time()
+        conn, cur = self._cursor()
+        cur.execute(f"INSERT INTO notes (title, body, category, created_at, updated_at) "
+                    f"VALUES ({self.ph},{self.ph},{self.ph},{self.ph},{self.ph})",
+                    (title, body, category, now, now))
+        nid = cur.lastrowid
+        if self.backend == "sqlite":
+            conn.commit()
+        else:
+            cur.close(); conn.close()
+        return int(nid or 0)
+
+    def update_note(self, nid: int, title: str | None, body: str | None,
+                    category: str | None = None) -> bool:
+        """created_at is left alone, so the list can still be ordered by when a
+        note was last touched without losing when it was written."""
+        conn, cur = self._cursor()
+        cur.execute(f"UPDATE notes SET title={self.ph}, body={self.ph}, "
+                    f"category={self.ph}, updated_at={self.ph} WHERE id={self.ph}",
+                    (title, body, category, time.time(), int(nid)))
+        n = cur.rowcount
+        if self.backend == "sqlite":
+            conn.commit()
+        else:
+            cur.close(); conn.close()
+        return n > 0
+
+    def delete_note(self, nid: int) -> bool:
+        """Takes the note's pictures with it - there is no other way to reach
+        them once the note is gone, and orphaned blobs would just accumulate."""
+        conn, cur = self._cursor()
+        cur.execute(f"DELETE FROM note_images WHERE note_id={self.ph}", (int(nid),))
+        cur.execute(f"DELETE FROM notes WHERE id={self.ph}", (int(nid),))
+        n = cur.rowcount
+        if self.backend == "sqlite":
+            conn.commit()
+        else:
+            cur.close(); conn.close()
+        return n > 0
+
+    # ---- note pictures ----
+    def add_note_image(self, note_id: int, mime: str, data: bytes,
+                       w: int = 0, h: int = 0) -> int:
+        conn, cur = self._cursor()
+        cur.execute(f"INSERT INTO note_images (note_id, mime, data, w, h, size, created_at) "
+                    f"VALUES ({self.ph},{self.ph},{self.ph},{self.ph},{self.ph},{self.ph},{self.ph})",
+                    (int(note_id), mime, data, int(w), int(h), len(data), time.time()))
+        iid = cur.lastrowid
+        if self.backend == "sqlite":
+            conn.commit()
+        else:
+            cur.close(); conn.close()
+        return int(iid or 0)
+
+    def note_image_index(self) -> dict:
+        """{note_id: [{id, w, h, size}, …]} - metadata only. The bytes are
+        fetched one at a time by the browser, never bundled into the note list."""
+        conn, cur = self._cursor()
+        cur.execute("SELECT id, note_id, w, h, size FROM note_images ORDER BY id")
+        rows = cur.fetchall()
+        if self.backend != "sqlite":
+            cur.close(); conn.close()
+        out = {}
+        for r in rows:
+            out.setdefault(int(r[1]), []).append(
+                {"id": int(r[0]), "w": r[2], "h": r[3], "size": r[4]})
+        return out
+
+    def get_note_image(self, iid: int):
+        conn, cur = self._cursor()
+        cur.execute(f"SELECT mime, data FROM note_images WHERE id={self.ph}", (int(iid),))
+        r = cur.fetchone()
+        if self.backend != "sqlite":
+            cur.close(); conn.close()
+        return (r[0], bytes(r[1])) if r else (None, None)
+
+    def delete_note_image(self, iid: int) -> bool:
+        conn, cur = self._cursor()
+        cur.execute(f"DELETE FROM note_images WHERE id={self.ph}", (int(iid),))
         n = cur.rowcount
         if self.backend == "sqlite":
             conn.commit()

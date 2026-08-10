@@ -26,6 +26,7 @@
     "per_filament_id": {},
     "per_type": {},
     "prices_from_orders": true,
+    "allow_slot_assign": false,
     "low_pct": 15,
     "store_region": "eu",
     "color_names": { "A00-W01": "Jade White" }

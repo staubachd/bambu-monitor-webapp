@@ -98,6 +98,13 @@ per print must be accurate)
   header sits at the position of its newest member, so the history still reads
   chronologically. Renaming is a click on the ✎; clearing the name dissolves the
   group
+- Adding to an existing group is a **drag**: grab a row by its handle and drop it
+  on the group (header or any member). Dragging one of several selected prints
+  carries the whole selection, so a batch is still one gesture
+- Four **views**, remembered: *Timeline* (everything by date), *Groups first*
+  (projects, a divider, then single prints), *Only groups* — the collapsed headers
+  read as a project list — and *Only singles*. The summary line counts what is on
+  screen, not what exists
 - **MakerWorld links** — jobs sliced from MakerWorld show a link straight to the
   source model (deep-linked to the exact print profile), on both the live job tile
   and each history row; the `design_id`/`profile_id` are captured to the database
@@ -111,6 +118,11 @@ per print must be accurate)
 - Identities are **remembered in the database** (`filaments` table), so a spool
   keeps its product line, colour code and colour name long after it has been used
   up and thrown away
+- **Editable naming**: click a row's vendor or name to set **vendor / product /
+  colour** by hand. This is the only way a third-party spool gets a name at all —
+  the printer reports a borrowed Bambu profile and a colour, never a manufacturer
+  — and it is what lets purchases match it, wording being the sole route without a
+  colour code. Genuine spools show *Bambu Lab* without anyone typing it
 - Shows which filaments are **in the AMS right now** (slot, remaining %, Low flag)
   with the same **Reorder ↗** link, so the page doubles as a shopping list
 - A **purchase log**: drop a Bambu **invoice PDF** on the page and it reads the
@@ -146,6 +158,21 @@ per print must be accurate)
   regular use), converted to print-hours here (~3 h/day); intervals are **editable**
   and a **Done** button resets a task's clock at the current hour-mark
 
+**Notes** (own tab)
+- A scratchpad kept in the database: plain text, links and YouTube links, with an
+  optional title per note. Edit and delete in place, newest-touched first
+- **Categories** — free text with autocomplete, suggested as *General · Tips &
+  Tricks · Settings · Filament · Troubleshooting · Models & Ideas* but not limited
+  to them. Filter chips with counts sit above the list (plus **Other** for
+  uncategorised), and the chosen filter is remembered
+- URLs become links automatically; YouTube ones are marked with a ▶. Nothing is
+  embedded and no thumbnails are fetched — the dashboard stays free of external
+  assets, which is what lets it work on an offline NAS
+- **Pictures**, stored in the database with the note, so one backup covers both.
+  The browser downscales before uploading (max 1400 px, JPEG ~82 %), which turns
+  a 6 MB phone photo into a few hundred KB; small PNG/WebP/GIF pass through
+  untouched so transparency and animation survive. Click a thumbnail for full size
+
 **Recording modes** (three-state toggle in the header)
 - **Auto** — record only while a print is active (+ a cool-down tail), so the NAS
   disks can hibernate the rest of the time
@@ -162,6 +189,9 @@ server-side allowlist** — never a free-form gcode passthrough)
   firmware-managed); the live refresh won't yank a slider mid-drag
 - **Temperature setpoints:** heated **bed** (`M140`) and **chamber** (`M141`),
   clamped to safe ranges (bed 0–120, chamber 0–60 °C; 0 = off)
+- **Assign a filament to an AMS slot** — built, but **off by default and it does
+  not work on current firmware**. See
+  [MQTT command verification](#mqtt-command-verification) below
 - **Chamber LED** on/off toggle in the header
 - **Raw printer data** browser showing the complete last report from the printer,
   with keys **colour-coded green when the app already consumes them** and white
@@ -176,7 +206,7 @@ server-side allowlist** — never a free-form gcode passthrough)
 
 **UI**
 - Tabbed layout: Overview / Machine / History / Statistics / Filament /
-  Maintenance (+ Live when enabled)
+  Maintenance / Notes (+ Live when enabled)
 - **Responsive header** — below 1150 px the tab bar moves onto a full-width row of
   its own and the serial/firmware line steps aside; below 560 px the last-update
   stamp folds away too, so the chips still fit on a phone
@@ -321,6 +351,7 @@ Design constraints that shaped these choices:
 | `tools/test_mqtt_local.py`    | Standalone check that local MQTT works against the printer.             |
 | `tools/capture_sample.py`     | Captures a real report to `samples/sample_report.json` for offline parser testing. |
 | `tools/explore_ftps.py`       | Explores the printer's FTPS file store (models/thumbnails).            |
+| `tools/dump_cloud_tasks.py`   | Read-only: cloud tasks next to the stored prints. Diagnoses why an orphaned print didn't close. |
 | `samples/`                    | Captured payloads used by `bambu_state.py`'s self-test (not committed).  |
 | **`deploy/`**                 |                                                                         |
 | `deploy/start.sh`             | Idempotent POSIX launcher (pidfile + `kill -0`), supports a `restart` arg. |
@@ -556,9 +587,17 @@ printer (and re-enable LAN Mode Live View, which a reboot can revert).
 | `GET /api/camera`          | `{ enabled, api_port, src }` — whether the Live view tab shows and how to reach the go2rtc relay (no secrets). |
 | `POST /api/recording`      | Set recording mode `{ "mode": "auto"｜"on"｜"off" }` (persisted).    |
 | `POST /api/led`            | Chamber light `{ "mode": "on"｜"off" }` (needs a live connection).   |
+| `POST /api/ams/filament`   | Tell the printer what is loaded in a slot `{ "slot": 1, "fkey": … }`. **Disabled by default** (`filament.allow_slot_assign`) — current firmware rejects it, see [MQTT command verification](#mqtt-command-verification). |
 | `POST /api/print/control`  | Print controls `{ "action": "pause｜resume｜stop｜speed｜fan｜temp", … }` — strict allowlist (speed 1–4, fan `cooling｜aux1｜aux2` %, temp `bed｜chamber` °C). Needs a live connection. |
 | `GET /api/stats`           | Lifetime analytics from the prints table (totals, success rate, per-month, top models). |
+| `GET /api/notes`           | All notes, newest-touched first.                                    |
+| `POST /api/notes`          | Create a note, or update one when an `id` is included.              |
+| `POST /api/notes/delete`   | Delete a note `{ "id": … }`, and its pictures with it.              |
+| `POST /api/notes/image`    | Attach a picture (`multipart`: `file`, `note_id`). JPEG/PNG/WebP/GIF, 3 MB ceiling. |
+| `GET /api/notes/image/<id>`| The picture bytes, cached immutably.                                |
+| `POST /api/notes/image/delete` | Remove one picture `{ "id": … }`.                               |
 | `GET /api/filaments`       | Per-filament consumption (grams, cost, prints, share, last used) joined with the stored identities, the purchase log and what is loaded in the AMS right now. |
+| `POST /api/filaments/identity` | Name a filament `{ "fkey": …, "vendor": …, "product": …, "color_name": … }`. Creates the identity row if only the print history knew it; empty values clear a field. |
 | `POST /api/purchases`      | Log one or more order lines `{ "lines": [ … ] }` (or a single line object). |
 | `POST /api/purchases/parse`| Read an order: an uploaded invoice PDF (`multipart`, field `file`) or pasted text (`{ "text": … }`). **Stores nothing** — returns suggested lines for the user to confirm. |
 | `POST /api/purchases/delete` | Remove one order line `{ "id": … }`.                            |
@@ -567,6 +606,7 @@ printer (and re-enable LAN Mode Live View, which a reboot can revert).
 | `POST /api/maintenance/config`| Edit a task's interval (or the baseline hour offset).             |
 | `POST /api/prints/label`   | Rename a print (editable job name).                                 |
 | `POST /api/prints/group`   | Put prints in a named group `{ "job_ids": […], "name": "…" }`; a blank name ungroups them. |
+| `POST /api/prints/finish`  | Close a print that never got an end time `{ "job_id": …, "minutes": … }` — for when the app itself was down mid-job. Refuses a genuinely running print. |
 | `POST /api/prints/filament`| Override the filament grams for a print.                            |
 | `POST /api/prints/delete`  | Delete one print from the history `{ "job_id": … }`. Refuses a currently-running job with **409**; the telemetry time-series is left untouched. |
 | `POST /api/cloud/refresh`  | Trigger an immediate Bambu Cloud enrichment pass.                   |
@@ -592,9 +632,12 @@ migration list, so the schema can evolve without manual `ALTER`s.
   enrichment from clobbering user edits or live data. Rows can be deleted from the
   history page; that removes only the summary row — `telemetry` is a plain time
   series and isn't owned by any single job.
-- **`filaments`** — one row per filament identity ever seen in the AMS: `fkey`
-  (SKU + colour, the aggregation key), SKU, colour code, product line, hex, colour
-  name, material, `is_bambu`, `first_seen` / `last_seen`. Identity only — **no
+- **`filaments`** — one row per filament identity: `fkey` (SKU + colour, the
+  aggregation key), SKU, colour code, **vendor**, product line, hex, colour name,
+  material, `is_bambu`, `first_seen` / `last_seen`. Written by the AMS observer,
+  and by hand from the Filament page — the user's fields (`vendor`, `product`,
+  `color_name`) are never blanked by an observation, and a row is created on
+  demand when only the print history knew that filament. Identity only — **no
   usage counters**, which are aggregated from `prints.filament_detail` instead so
   the two can never disagree. Updates never overwrite a populated field with a
   blank one, so a frame where the RFID tag wasn't read can't erase a good read.
@@ -604,6 +647,16 @@ migration list, so the schema can evolve without manual `ALTER`s.
   foreign key — a purchase is matched to a filament at read time on "product line
   + colour name", so a spool bought today links itself up the first time the AMS
   actually sees it.
+- **`notes`** — free-form notes: `title`, `body`, `category`, `created_at`,
+  `updated_at`. The category is the name itself, like `prints.pgroup` — no
+  category table, renaming is writing a new name on those notes, and a category
+  stops existing when its last note leaves.
+  Rendered escape-first, then linkified — the reverse order would let a note
+  inject markup into the page.
+- **`note_images`** — a picture per row (`note_id`, `mime`, `data` BLOB, size),
+  deleted along with its note. The note listing carries only metadata; the bytes
+  are fetched one URL at a time and cached immutably, since an id's content never
+  changes.
 - **`settings`** — small key/value store (e.g. the persisted recording mode, HMS
   acknowledgements, and per-task maintenance intervals / reset marks).
 
@@ -697,9 +750,19 @@ A few behaviours are non-obvious because the printer's raw data is messy:
   PETG Basic). That last route is what reaches filament used up long ago: a print
   row carries the SKU and a colour hex but no colour code, while an invoice
   carries a colour code but neither SKU nor hex, so nothing else bridges them.
-  When one SKU covers several colours the colour name decides; if it can't, the
-  line stays **ambiguous** rather than guessing. Every purchase shows which route
-  matched it, so a miss is diagnosable instead of mysterious.
+  Every purchase shows which route matched it, so a miss is diagnosable instead
+  of mysterious.
+
+- **The SKU route must never match on the SKU alone.** Every colour of a product
+  line derives the *same* SKU — `A01-R4`, `A01-G0` and `A01-B6` are all `GFA01` —
+  so "exactly one candidate for this SKU" is not evidence. It used to be, and the
+  result was every PLA Matte order attaching itself to the one PLA Matte identity
+  on record, which then claimed to have been bought eleven times. Candidates are
+  now dropped when their colour code or colour name contradicts the purchase, and
+  a lone *anonymous* candidate (a filament the print history knows by SKU and hex
+  only) is refused when the purchase log holds more than one colour of that
+  product — that would be a coin flip. Unmatched lines become their own stock
+  rows, which is the honest outcome.
 
 - **Bought-but-unused filament is still filament.** A purchase that matches
   nothing gets its own row — keyed by colour code, so four colours of one product
@@ -727,6 +790,13 @@ A few behaviours are non-obvious because the printer's raw data is messy:
   rather than `/products/<handle>`: product handles can't be verified from here and
   a 404 at the moment you want to reorder is worse than one extra click.
 
+- **The external holder keeps reporting a spool that has been moved.** `vir_slot`
+  holds the last filament assigned to it indefinitely, so after moving that spool
+  into a tray the printer reports it in *both* places. With the same profile and
+  colour both are the same identity, and merging them with plain assignment let
+  the stale external entry overwrite the real tray — the spool showed as
+  "external" forever. AMS trays are now merged first and win.
+
 - **"Low" only applies to RFID spools.** Remaining % comes from the tag, so a
   third-party tray reports `-1` and an external spool reports `0` — neither means
   empty, and warning on them would cry wolf on every non-Bambu spool.
@@ -747,6 +817,19 @@ A few behaviours are non-obvious because the printer's raw data is messy:
 - **MakerWorld id survives partial reports.** Bambu's incremental MQTT frames often
   omit `design_id`/`profile_id`, so they're **latched in memory** while a job prints
   and persisted from there — a partial update can't null out the stored model link.
+
+- <a id="mqtt-command-verification"></a>**MQTT command verification blocks
+  `ams_filament_setting`.** Firmware 01.08.03.00beta/01.08.05.00 added a check on
+  the local MQTT request topic: commands the printer does not consider to come
+  from a trusted client are rejected with HMS **0500_0500_0001_0007**, *"MQTT
+  Command verification failed, please update Studio or Handy"*. Confirmed on an
+  X2D — assigning a filament to an AMS slot raised that warning and changed
+  nothing. The simple controls this app has always used (`pause`/`resume`/`stop`,
+  `print_speed`, `gcode_line`, `ledctrl`) are **not** gated and keep working.
+  The feature is therefore behind `filament.allow_slot_assign` (default
+  **false**), which also hides the button; nothing sends the command while it is
+  off. Kept rather than deleted in case LAN-only mode or later firmware behaves
+  differently.
 
 - **A print group is a name, not a table.** `prints.pgroup` holds the group's
   name directly: no ids to keep in step, renaming is "write the new name on the
@@ -791,12 +874,15 @@ A few behaviours are non-obvious because the printer's raw data is messy:
 | `#1054 Unknown column …` (MariaDB)                  | Backend is on MariaDB but the schema is behind; the column-migration runs on startup — restart the app, or check the config didn't get flipped to sqlite. |
 | Garbled `°`/`€`/umlauts after editing on Windows    | A file was round-tripped through PowerShell; re-edit with a UTF-8-aware tool. |
 | Cloud login fails                                   | Re-run `tools/setup_cloud.py` to refresh the stored token.                  |
+| A print is stuck on **"running"** with a runaway duration | The app was down when it finished, so no end time was recorded. Press **Refresh** — cloud enrichment closes it if the job is still among the last 20 cloud tasks and reports `status == 2`. Otherwise click its **Duration** cell and type how long it took (`5h 20m`). `tools/dump_cloud_tasks.py` shows which condition failed. |
 | A spool shows a **code** (`A00-N04`) instead of a colour name | That code isn't in the built-in table. Add `"A00-N04": "Cocoa Brown"` under `filament.color_names` and restart. |
 | A purchase says **"not matched to a filament"** | Nothing on record matches it yet — that filament has neither been printed with nor seen in the AMS. It still appears on the page as **unused** stock, and links itself the first time the spool is loaded or used. |
 | A purchase says **"ambiguous — colour unclear"** | Several colours of that product are on record and the colour name doesn't single one out — commonly a localised name ("Jade Weiß") against an English one. Fix the line's **colour code** rather than its name: the code match ignores language. |
 | Uploading a PDF says **"pypdf is not installed"** | The PDF reader is an optional dependency, and it must go into the **app's venv**, not the system Python: `cd /volume1/apps/bambu-monitor && ./venv/bin/python3 -m pip install pypdf`, then restart. Or paste the invoice text instead. |
 | Saving a purchase fails with **"Unknown column …"** | A column added after that table first shipped. Every such column is listed in `storage.LATE_COLUMNS` and applied on startup — restart the app; the log shows `[store] migrated: added …`. |
 | **Bought/Left** columns are empty                   | No purchases logged for that filament yet. Paste an order, or add a line by hand on the Filament tab. |
+| Filament page shows a spool as **external** after moving it into a tray | Fixed — the printer keeps reporting the last external assignment after the spool has gone, and the stale entry used to win. AMS trays now take priority over the external holder for the same identity. |
+| Filament page shows a spool in the **wrong slot**, or twice | Identity is SKU + colour. If a spool reports a different profile or colour in a tray than it did on the external holder, that is a **different identity** and appears as a second row rather than moving. |
 | Filament page shows only **material + hex** for an old filament | It was used up before the page existed, so the AMS never recorded its identity. Only prints carry it, and they store just SKU + colour. It names itself properly if a spool of it is loaded again. |
 | A spool has **no Reorder link / no "Low" flag**     | It isn't a genuine Bambu spool (`tag_uid` is all-zero), so the printer reports neither an identity nor a real remaining %. Expected for third-party and external spools. |
 | Deleting a print says **"print is still running"**  | Intentional: the job is active, its energy total is still accumulating and it would be re-created anyway. Delete it once it has finished. |
@@ -805,6 +891,7 @@ A few behaviours are non-obvious because the printer's raw data is messy:
 | Live view tab missing                               | `camera.enabled` is false, or `/api/camera` reports disabled. Set it in `printer.config.json` and restart. |
 | Print controls do nothing / "printer not connected" | Recording mode is **Off**, which drops the MQTT stream — controls need a live connection. Switch to Auto/On. |
 | A fan slider moves the **wrong** fan                | The `M106` fan mapping (`P1/P2/P3`) can differ per model. Adjust `_FAN_GCODE` in `app.py`. |
+| **HMS 0500_0500_0001_0007** after assigning a slot  | *"MQTT Command verification failed"* — the firmware rejected the command; nothing was written and nothing is damaged. Acknowledge the warning in the header. Slot assignment ships **off** for this reason; see [MQTT command verification](#mqtt-command-verification). |
 | **Chamber** setpoint has no effect                  | The X2D firmware may not honour `M141` over `gcode_line`. Verify by setting e.g. 40 °C and watching `chamber.target` in the Raw data view; the bed (`M140`) works regardless. |
 
 ---

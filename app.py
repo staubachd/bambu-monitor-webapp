@@ -740,6 +740,7 @@ def _enrich_ams(state: dict) -> None:
                          and 0 <= pct <= FIL_LOW_PCT)
     if ams:
         ams["low_pct"] = FIL_LOW_PCT
+        ams["can_assign"] = AMS_ASSIGN   # hides the button unless switched on
 
 
 _fil_obs = {}   # fkey -> (identity tuple, ts) of what was last written
@@ -794,8 +795,8 @@ def _detail_entries(row: dict) -> list[dict]:
     return out
 
 
-def _match_purchase(p: dict, agg: dict, known: dict,
-                    fkey_by_code: dict, fkey_by_match: dict) -> tuple:
+def _match_purchase(p: dict, agg: dict, known: dict, fkey_by_code: dict,
+                    fkey_by_match: dict, sku_colours: dict) -> tuple:
     """Link one purchase to a filament identity. Returns (fkey|None, how).
 
     Four routes, most certain first. The SKU route is the one that reaches
@@ -817,17 +818,36 @@ def _match_purchase(p: dict, agg: dict, known: dict,
     sku = filament_catalog.sku_from_code(code)
     if sku:
         cands = [k for k in agg if k.startswith(sku + "|")]
-        if len(cands) == 1:
-            return cands[0], "sku"
-        # several colours of the same product: let the colour name decide, and
-        # rather than pick one at random, stay unmatched when it can't
         want = (p.get("color_name") or "").strip().lower()
-        if want:
-            named = [k for k in cands
-                     if (known.get(k, {}).get("color_name") or "").strip().lower() == want]
-            if len(named) == 1:
-                return named[0], "sku+colour"
-        if cands:
+        # Every colour of one product line derives the SAME sku - A01-R4, A01-G0
+        # and A01-B6 are all GFA01 - so this route must never match on the sku
+        # alone. Drop any candidate that positively contradicts this purchase,
+        # by colour code or by colour name.
+        ok = []
+        for k in cands:
+            m = known.get(k, {})
+            kcode = filament_catalog.norm_code(m.get("code"))
+            if kcode and code and kcode != code:
+                continue                       # a different colour, same product
+            kname = (m.get("color_name") or "").strip().lower()
+            if kname and want and kname != want:
+                continue
+            ok.append(k)
+        named = [k for k in ok
+                 if (known.get(k, {}).get("color_name") or "").strip().lower() == want]
+        if want and len(named) == 1:
+            return named[0], "sku+colour"
+        if len(ok) == 1:
+            # The one survivor may simply be anonymous - a filament the print
+            # history knows by sku and hex only. Then it can be claimed by at
+            # most one colour: if the purchase log holds several colours of this
+            # product, guessing which one it is would be a coin flip.
+            m = known.get(ok[0], {})
+            if (m.get("code") or m.get("color_name")
+                    or len(sku_colours.get(sku, ())) <= 1):
+                return ok[0], "sku"
+            return None, "ambiguous"
+        if ok:
             return None, "ambiguous"
     return None, None
 
@@ -897,8 +917,17 @@ def _filament_stats() -> dict:
         nc = filament_catalog.norm_code(f.get("code"))
         if nc:
             fkey_by_code.setdefault(nc, fkey)
+    # how many distinct colours of each product line the purchase log knows -
+    # used to refuse a coin-flip match onto a single anonymous identity
+    sku_colours = {}
     for p in purchases:
-        fkey, how = _match_purchase(p, agg, known, fkey_by_code, fkey_by_match)
+        sku = filament_catalog.sku_from_code(p.get("code"))
+        nc = filament_catalog.norm_code(p.get("code"))
+        if sku and nc:
+            sku_colours.setdefault(sku, set()).add(nc)
+    for p in purchases:
+        fkey, how = _match_purchase(p, agg, known, fkey_by_code, fkey_by_match,
+                                    sku_colours)
         p["matched_by"] = how
         if not fkey:
             unmatched.append(p)
@@ -918,13 +947,19 @@ def _filament_stats() -> dict:
     with _state_lock:
         ams = json.loads(json.dumps((_state.get("ams") or {})))   # cheap deep copy
     loaded = {}
+    # setdefault, not assignment, and AMS trays before the external holder: the
+    # printer keeps reporting the last filament assigned to the external slot
+    # even after that spool has been moved into a tray. Same profile and colour
+    # means the same identity, so plain assignment let the stale external entry
+    # overwrite the real tray and the spool showed as "external" forever.
     groups = [(u.get("trays") or [], False) for u in (ams.get("units") or [])]
     groups.append((ams.get("external") or [], True))
     for trays, ext in groups:
         for tr in trays:
             if tr.get("type"):
-                loaded[filament_catalog.key(tr.get("filament_id"), tr.get("color"),
-                                            tr.get("type"))] = (tr, ext)
+                loaded.setdefault(
+                    filament_catalog.key(tr.get("filament_id"), tr.get("color"),
+                                         tr.get("type")), (tr, ext))
 
     total_g = sum(a["grams"] for a in agg.values()) or 0.0
     out = []
@@ -956,8 +991,14 @@ def _filament_stats() -> dict:
             # naming comes from the AMS observation; the cloud detail never
             # carries the product line or the colour code
             "code": meta.get("code"),
+            # a genuine spool needs no one to type "Bambu Lab"; derived rather
+            # than stored, so a user edit still wins whenever there is one
+            "vendor": meta.get("vendor") or ("Bambu Lab" if is_bambu else None),
             "product": meta.get("product"),
             "color_name": meta.get("color_name"),
+            # a real SKU|HEX identity can always be named, even when only the
+            # print history knows it; the synthetic purchase rows cannot
+            "editable": True,
             "color": a.get("color") or meta.get("color"),
             "is_bambu": is_bambu,
             "first_seen": meta.get("first_seen"),
@@ -985,6 +1026,7 @@ def _filament_stats() -> dict:
             "fkey": k, "filament_id": filament_catalog.sku_from_code(p.get("code")),
             "code": p.get("code"), "product": p.get("product"),
             "color_name": p.get("color_name"), "color": p.get("color"),
+            "vendor": None, "editable": False,   # no identity row to write to
             "type": p.get("type"), "grams": 0.0, "cost": 0.0, "prints": 0,
             "share": 0, "first_used": None, "last_used": None, "is_bambu": None,
             "first_seen": None, "slot": None, "external": False, "loaded": False,
@@ -1382,6 +1424,152 @@ def _learn_color(code: str | None, name: str | None) -> None:
         print(f"[filament] could not store colour name: {e}")
 
 
+NOTE_MAX = 20000        # generous for pasted links and notes, bounded all the same
+
+
+IMAGE_MAX = 3 * 1024 * 1024      # the browser downscales first; this is the ceiling
+IMAGE_MIMES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+
+
+@app.route("/api/notes")
+def api_notes():
+    notes = store.all_notes()
+    try:
+        idx = store.note_image_index()
+    except Exception:
+        idx = {}
+    for n in notes:
+        n["images"] = idx.get(n["id"], [])
+    return jsonify({"notes": notes})
+
+
+@app.route("/api/notes", methods=["POST"])
+def api_note_save():
+    """Create a note, or update one when an id comes with it."""
+    data = request.get_json(force=True, silent=True) or {}
+    title = (data.get("title") or "").strip()[:200]
+    body = (data.get("body") or "").strip()[:NOTE_MAX]
+    # free text, like a print group: no category table to keep in step, and a
+    # category stops existing when its last note leaves
+    cat = (data.get("category") or "").strip()[:60] or None
+    if not title and not body:
+        return jsonify({"ok": False, "error": "an empty note is nothing"}), 400
+    nid = _num_or_none(data.get("id"), int)
+    try:
+        if nid:
+            if not store.update_note(nid, title or None, body or None, cat):
+                return jsonify({"ok": False, "error": "no such note"}), 404
+        else:
+            nid = store.add_note(title or None, body or None, cat)
+    except Exception as e:
+        print(f"[notes] save failed: {e}")
+        return jsonify({"ok": False, "error": str(e)[:300]}), 500
+    return jsonify({"ok": True, "id": nid})
+
+
+@app.route("/api/notes/delete", methods=["POST"])
+def api_note_delete():
+    data = request.get_json(force=True, silent=True) or {}
+    nid = _num_or_none(data.get("id"), int)
+    if nid is None:
+        return jsonify({"ok": False, "error": "missing id"}), 400
+    return jsonify({"ok": store.delete_note(nid), "id": nid})
+
+
+@app.route("/api/notes/image", methods=["POST"])
+def api_note_image_add():
+    """Attach a picture to a note. Multipart: `file`, plus `note_id`."""
+    nid = _num_or_none(request.form.get("note_id"), int)
+    f = request.files.get("file")
+    if not nid or f is None:
+        return jsonify({"ok": False, "error": "need note_id and a file"}), 400
+    mime = (f.mimetype or "").lower()
+    if mime not in IMAGE_MIMES:
+        return jsonify({"ok": False, "error": f"unsupported type {mime or '?'}"}), 400
+    blob = f.read(IMAGE_MAX + 1)
+    if not blob:
+        return jsonify({"ok": False, "error": "empty file"}), 400
+    if len(blob) > IMAGE_MAX:
+        return jsonify({"ok": False, "error": "image too large"}), 413
+    try:
+        iid = store.add_note_image(nid, mime, blob,
+                                   _num_or_none(request.form.get("w"), int) or 0,
+                                   _num_or_none(request.form.get("h"), int) or 0)
+    except Exception as e:
+        print(f"[notes] image save failed: {e}")
+        return jsonify({"ok": False, "error": str(e)[:300]}), 500
+    return jsonify({"ok": True, "id": iid, "size": len(blob)})
+
+
+@app.route("/api/notes/image/<int:iid>")
+def api_note_image(iid: int):
+    mime, blob = store.get_note_image(iid)
+    if not blob:
+        return jsonify({"ok": False, "error": "no such image"}), 404
+    # the bytes for an id never change, so let the browser keep them
+    return Response(blob, mimetype=mime or "application/octet-stream",
+                    headers={"Cache-Control": "private, max-age=31536000, immutable"})
+
+
+@app.route("/api/notes/image/delete", methods=["POST"])
+def api_note_image_delete():
+    data = request.get_json(force=True, silent=True) or {}
+    iid = _num_or_none(data.get("id"), int)
+    if iid is None:
+        return jsonify({"ok": False, "error": "missing id"}), 400
+    return jsonify({"ok": store.delete_note_image(iid), "id": iid})
+
+
+@app.route("/api/filaments/identity", methods=["POST"])
+def api_filament_identity():
+    """Name a filament: vendor, product line, colour name.
+
+    The only way a third-party spool gets a name at all - the printer reports a
+    borrowed Bambu profile and a colour, never a manufacturer. Naming it is also
+    what lets purchases match it, since wording is the sole route available
+    without a colour code.
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    fkey = (data.get("fkey") or "").strip()
+    if not fkey:
+        return jsonify({"ok": False, "error": "missing fkey"}), 400
+    fields = {k: ((data.get(k) or "").strip()[:64] or None)
+              for k in ("vendor", "product", "color_name") if k in data}
+    if not fields:
+        return jsonify({"ok": False, "error": "nothing to set"}), 400
+    # An identity is 'SKU|RRGGBB' (or a bare material and '?' when the printer
+    # gave neither). Checking the shape keeps create-on-demand from minting junk
+    # rows for anything an API caller happens to post.
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,24}\|([0-9A-Fa-f]{6}|\?)", fkey):
+        return jsonify({"ok": False, "error": "not a filament identity"}), 400
+    try:
+        ok = store.set_filament_identity(fkey, **fields)
+        if not ok:
+            # Filament used up before the AMS was ever observed exists only in
+            # the print history - and is exactly what most needs a name. Create
+            # the identity row from the key itself: SKU|HEX.
+            sku, _, hexc = fkey.partition("|")
+            store.upsert_filament(
+                fkey,
+                filament_id=sku if sku.upper().startswith("GF") else None,
+                type=None if sku.upper().startswith("GF") else sku,
+                color=filament_catalog.norm_color(hexc))
+            ok = store.set_filament_identity(fkey, **fields)
+    except Exception as e:
+        print(f"[filament] identity update failed: {e}")
+        return jsonify({"ok": False, "error": str(e)[:300]}), 500
+    if not ok:
+        return jsonify({"ok": False, "error": "no such filament"}), 404
+    # A Bambu spool's colour name is re-derived from the catalogue on every AMS
+    # observation, so persist the user's wording as a learned name too -
+    # otherwise the next frame would quietly undo the edit.
+    if "color_name" in fields and fields["color_name"]:
+        row = next((f for f in store.all_filaments() if f["fkey"] == fkey), None)
+        if row and row.get("code"):
+            _learn_color(row["code"], fields["color_name"])
+    return jsonify({"ok": True, "fkey": fkey, **fields})
+
+
 @app.route("/api/purchases", methods=["POST"])
 def api_purchase_add():
     """Log one order line. Everything is optional except a product or colour to
@@ -1554,6 +1742,39 @@ def api_print_label():
     return jsonify({"ok": ok, "job_id": job_id, "label": label or None})
 
 
+@app.route("/api/prints/finish", methods=["POST"])
+def api_print_finish():
+    """Close a print the app never saw end - typically the machine running this
+    app lost power mid-job, so no end time was ever recorded.
+
+    The duration has to come from the user: nothing local knows it, precisely
+    because nothing was running. The cloud path in _apply_cloud_task remains the
+    better route whenever the job is still in the cloud's recent task list.
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    job_id = (data.get("job_id") or "").strip()
+    minutes = _num_or_none(data.get("minutes"))
+    if not job_id:
+        return jsonify({"ok": False, "error": "missing job_id"}), 400
+    if not minutes or minutes <= 0:
+        return jsonify({"ok": False, "error": "duration must be above zero"}), 400
+    row = store.get_print(job_id)
+    if not row:
+        return jsonify({"ok": False, "error": "no such print"}), 404
+    with _state_lock:
+        live = dict(_state.get("job") or {})
+    if str(live.get("task_id") or "") == job_id and live.get("state") in ACTIVE_STATES:
+        return jsonify({"ok": False, "error": "print is still running"}), 409
+    if not row.get("started_at"):
+        return jsonify({"ok": False, "error": "print has no start time"}), 400
+    fields = {"ended_at": float(row["started_at"]) + minutes * 60.0}
+    # it only still says RUNNING because we stopped watching, not because it is
+    if (row.get("final_state") or "") in ACTIVE_STATES:
+        fields["final_state"] = "FINISH"
+    ok = store.update_print_fields(job_id, **fields)
+    return jsonify({"ok": ok, "job_id": job_id, "ended_at": fields["ended_at"]})
+
+
 @app.route("/api/prints/group", methods=["POST"])
 def api_print_group():
     """Group prints under a name, or ungroup them when the name is blank.
@@ -1683,6 +1904,120 @@ def api_print_control():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)[:120]}), 500
     return jsonify({"ok": True})
+
+
+# OFF by default, and it should stay off unless you are experimenting.
+#
+# Firmware 01.08.03.00beta/01.08.05.00 added MQTT command verification: the
+# printer rejects commands it does not consider to come from a trusted client
+# and raises HMS 0500_0500_0001_0007, "MQTT Command verification failed".
+# ams_filament_setting is one of the gated commands - confirmed on an X2D, where
+# assigning a slot produced that warning and changed nothing. The simple print
+# controls (pause/resume/stop, print_speed, gcode_line, ledctrl) are not gated.
+#
+# Kept behind a switch rather than deleted, because it may behave differently in
+# LAN-only mode or on later firmware. Nothing raises the warning while it is off.
+AMS_ASSIGN = bool(FIL_CFG.get("allow_slot_assign", False))
+
+# Safe nozzle window per material, used when assigning a filament to a slot.
+# Only materials listed here can be assigned without explicit temperatures -
+# guessing a window for an unknown material is how you cook a nozzle.
+_MATERIAL_TEMPS = {
+    "PLA": (190, 230), "PETG": (230, 270), "PET": (230, 270),
+    "ABS": (240, 280), "ASA": (240, 280), "TPU": (200, 240),
+    "PVA": (190, 230), "PC": (260, 300), "PA": (250, 300),
+}
+
+
+@app.route("/api/ams/filament", methods=["POST"])
+def api_ams_filament():
+    """Tell the printer what is really loaded in an AMS slot.
+
+    The AMS reader only understands Bambu's own RFID tags, so a third-party
+    spool is simply whatever the tray was last told it is. This writes that
+    assignment from a filament you have already named - which also stamps a
+    distinct colour on the tray, the one thing the identity key needs to keep
+    two different green spools apart.
+
+    Strict allowlist, like every other command: slot must exist, material must
+    be known, colour must be six hex digits, temperatures are clamped.
+    """
+    if not AMS_ASSIGN:
+        return jsonify({"ok": False, "error":
+                        "slot assignment is off - the firmware rejects this "
+                        "command (HMS 0500_0500_0001_0007). Set "
+                        "filament.allow_slot_assign to try anyway."}), 403
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        slot = int(data.get("slot"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "slot must be a number"}), 400
+
+    with _state_lock:
+        ams = json.loads(json.dumps(_state.get("ams") or {}))
+    units = ams.get("units") or []
+    tray = unit_id = None
+    for u in units:
+        for tr in (u.get("trays") or []):
+            if tr.get("id") is not None and tr["id"] + 1 == slot:
+                tray, unit_id = tr, u.get("id", 0)
+    if tray is None:
+        return jsonify({"ok": False, "error": f"no AMS slot {slot}"}), 400
+
+    # Values come from a filament you have named; explicit fields override.
+    src = {}
+    fkey = (data.get("fkey") or "").strip()
+    if fkey:
+        try:
+            src = next((f for f in store.all_filaments() if f["fkey"] == fkey), {}) or {}
+        except Exception:
+            src = {}
+        if not src:
+            return jsonify({"ok": False, "error": "unknown filament"}), 404
+    ftype = (data.get("type") or src.get("type") or "").strip().upper()
+    color = filament_catalog.norm_color(data.get("color") or src.get("color"))
+    profile = (data.get("filament_id") or src.get("filament_id") or "").strip().upper()
+    if not ftype:
+        return jsonify({"ok": False, "error": "missing material"}), 400
+    if not color:
+        return jsonify({"ok": False, "error": "colour must be six hex digits"}), 400
+
+    base = ftype.split("-")[0]          # PLA-CF shares PLA's window
+    lo_hi = _MATERIAL_TEMPS.get(ftype) or _MATERIAL_TEMPS.get(base)
+    lo = _num_or_none(data.get("nozzle_temp_min"), int)
+    hi = _num_or_none(data.get("nozzle_temp_max"), int)
+    if lo is None or hi is None:
+        if not lo_hi:
+            return jsonify({"ok": False, "error":
+                            f"unknown material {ftype} - send nozzle_temp_min/max"}), 400
+        lo, hi = lo_hi
+    lo, hi = max(150, min(320, lo)), max(150, min(320, hi))
+    if lo >= hi:
+        return jsonify({"ok": False, "error": "nozzle_temp_min must be below max"}), 400
+
+    cmd = {"print": {
+        "sequence_id": "0", "command": "ams_filament_setting",
+        "ams_id": int(unit_id or 0), "tray_id": slot - 1,
+        "tray_info_idx": profile,       # the slicer profile, e.g. GFA00
+        "tray_color": color + "FF",     # the printer reports RRGGBBAA
+        "tray_type": ftype,
+        "nozzle_temp_min": lo, "nozzle_temp_max": hi,
+        "setting_id": "",
+    }}
+    client = _mqtt_client
+    if client is None:
+        return jsonify({"ok": False, "error": "printer not connected"}), 409
+    try:
+        client.publish(REQUEST_TOPIC, json.dumps(cmd))
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)[:120]}), 500
+    # logged in full: this is the one command whose acceptance by the X2D has
+    # not been confirmed, so the payload needs to be visible when it misbehaves
+    print(f"[ams] slot {slot} <- {ftype} #{color} {profile or '(no profile)'} "
+          f"{lo}-{hi}C :: {json.dumps(cmd['print'])}")
+    return jsonify({"ok": True, "slot": slot, "type": ftype, "color": color,
+                    "filament_id": profile or None,
+                    "nozzle_temp_min": lo, "nozzle_temp_max": hi})
 
 
 @app.route("/api/led", methods=["POST"])
