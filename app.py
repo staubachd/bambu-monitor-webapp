@@ -207,6 +207,12 @@ _last_print_write = {"ts": 0.0, "state": None}
 _deleted_jobs: set[str] = set()
 
 
+def _error_code(state: dict):
+    """The failure the printer is reporting right now, if any."""
+    errs = state.get("errors") or {}
+    return errs.get("print_error") or errs.get("mc_code") or errs.get("fail_reason")
+
+
 def _track_print(state: dict) -> None:
     """Keep the in-memory summary of the print currently being watched."""
     job = state.get("job") or {}
@@ -240,6 +246,11 @@ def _track_print(state: dict) -> None:
             profile_id=(prev or {}).get("profile_id"),
         )
         _deleted_jobs.clear()   # a new job: nothing old can be written back now
+        # `print_error` is machine state, not job state: the printer keeps
+        # reporting the last failure long after that job is gone, so whatever is
+        # showing right now belongs to the PREVIOUS print. Remember it and refuse
+        # to blame this one for it until the printer reports something else.
+        _print_row["stale_err"] = _error_code(state)
         # Single owner of the per-job energy reset, applied in the same tick the
         # job changes. A print we already know resumes from its stored total; a
         # genuinely new print starts at exactly zero.
@@ -326,9 +337,14 @@ def _persist_print(state: dict) -> None:
         _print_row["stored"] = {**stored, "energy_wh": energy, "peak_w": peak,
                                 "started_at": _print_row["started_at"],
                                 "ended_at": ended}
-        # Capture why it failed, while the printer is still reporting it
-        errs = state.get("errors") or {}
-        code = errs.get("print_error") or errs.get("mc_code") or errs.get("fail_reason")
+        # Capture why it failed, while the printer is still reporting it - but
+        # not the previous job's failure, which the printer is still showing
+        # because nothing clears it when a new print starts.
+        code = _error_code(state)
+        if not code:
+            _print_row["stale_err"] = None   # cleared: anything from now on is real
+        elif code == _print_row.get("stale_err"):
+            code = None                      # still the old one, not this print's
         if code and code != (stored.get("error_code")):
             store.update_print_fields(tid, error_code=str(code)[:64])
             _print_row["stored"]["error_code"] = str(code)[:64]
@@ -1884,6 +1900,28 @@ def api_print_finish():
         fields["final_state"] = "FINISH"
     ok = store.update_print_fields(job_id, **fields)
     return jsonify({"ok": ok, "job_id": job_id, "ended_at": fields["ended_at"]})
+
+
+@app.route("/api/prints/error", methods=["POST"])
+def api_print_error():
+    """Clear (or set) the failure code on a print. Needed because the printer
+    reports its last error as machine state, so before this was guarded a fresh
+    job could inherit the previous one's code."""
+    data = request.get_json(force=True, silent=True) or {}
+    job_id = (data.get("job_id") or "").strip()
+    code = (data.get("code") or "").strip()[:64]
+    if not job_id:
+        return jsonify({"ok": False, "error": "missing job_id"}), 400
+    was = (store.get_print(job_id) or {}).get("error_code")
+    ok = store.update_print_fields(job_id, error_code=code or None)
+    if job_id == _print_row.get("job_id"):
+        _print_row.setdefault("stored", {})["error_code"] = code or None
+        # Suppress the code just rejected, not whatever the printer happens to
+        # be showing - otherwise the next tick writes it straight back and the
+        # clear looks broken.
+        if not code:
+            _print_row["stale_err"] = was or _error_code(dict(_state))
+    return jsonify({"ok": ok, "job_id": job_id, "code": code or None})
 
 
 @app.route("/api/prints/group", methods=["POST"])

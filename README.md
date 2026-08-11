@@ -612,6 +612,7 @@ printer (and re-enable LAN Mode Live View, which a reboot can revert).
 | `POST /api/maintenance/config`| Edit a task's interval (or the baseline hour offset).             |
 | `POST /api/prints/label`   | Rename a print (editable job name).                                 |
 | `POST /api/prints/group`   | Put prints in a named group `{ "job_ids": […], "name": "…" }`; a blank name ungroups them. |
+| `POST /api/prints/error`   | Set or clear a print's failure code `{ "job_id": …, "code": "" }`. |
 | `POST /api/prints/finish`  | Close a print that never got an end time `{ "job_id": …, "minutes": … }` — for when the app itself was down mid-job. Refuses a genuinely running print. |
 | `POST /api/prints/filament`| Override the filament grams for a print.                            |
 | `POST /api/prints/delete`  | Delete one print from the history `{ "job_id": … }`. Refuses a currently-running job with **409**; the telemetry time-series is left untouched. |
@@ -854,6 +855,14 @@ A few behaviours are non-obvious because the printer's raw data is messy:
   same rows", and a group stops existing when its last member leaves. It sits in
   `PRINT_IMMUTABLE` alongside `label` — without that the 60-second persist tick
   would blank it on the running print, which is covered by a regression test.
+
+- **An error code belongs to a job, but the printer reports it as machine
+  state.** `print_error` keeps showing the last failure long after that job
+  ended, so cancelling one print and starting another stamped the old code onto
+  the new one. Whatever is being reported the moment a job begins is therefore
+  remembered as *stale* and ignored until the printer reports something else —
+  including nothing. The same code recurring after a genuine clear is recorded
+  normally, and a wrong code already on a row can be cleared by clicking it.
 
 - **A deleted print has to be tombstoned.** The printer keeps reporting the *last*
   job's `task_id` for as long as it sits idle, so simply deleting the row would let

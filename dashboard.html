@@ -660,6 +660,8 @@
   .st-bad{background:rgba(239,68,68,.15); color:var(--danger)}
   .st-idle{background:var(--track); color:var(--text-3)}
   .err-sub{font-size:10.5px; color:var(--danger); margin-top:3px; font-family:ui-monospace,monospace}
+  .err-clr{cursor:pointer}
+  .err-clr:hover{text-decoration:line-through}
 
   #rawBox{margin:14px 0 0; max-height:420px; overflow:auto; background:var(--surface-2);
     border:1px solid var(--border); border-radius:11px; padding:13px; font-size:11.5px;
@@ -1349,6 +1351,9 @@ const DE = {
   "never finished — click to set how long it took":
     "nie beendet – klicken, um die Dauer einzutragen",
   "e.g. 5h 20m":"z. B. 5h 20m",
+  "wrong error? click to clear it":"falscher Fehler? klicken zum Entfernen",
+  "Clear this error code?":"Diesen Fehlercode entfernen?",
+  "Error code cleared":"Fehlercode entfernt",
   "Could not read that duration — try 5h 20m or 320":
     "Dauer nicht verstanden – z. B. 5h 20m oder 320",
   "Could not close this print.":"Der Druck konnte nicht abgeschlossen werden.",
@@ -2128,6 +2133,18 @@ $("histTable").addEventListener("click", async e=>{
     }
     return;
   }
+  const err = e.target.closest(".err-clr");
+  if(err){
+    if(!confirm(t("Clear this error code?"))) return;
+    try{
+      await fetch("/api/prints/error", {method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({job_id: err.dataset.job, code: ""})});
+    }catch(_){}
+    toast(t("Error code cleared"));
+    loadPrints();
+    return;
+  }
   const grp = e.target.closest("tr.grp");
   if(grp){
     const k = grp.dataset.grp;
@@ -2311,7 +2328,8 @@ function printRow(r, cur){
         <td><span class="pill-state ${stateClass(r.final_state)}"${
               r.error_code?` title="printer error ${esc(r.error_code)}"`:""}>${
               running ? t("running") : t(FINAL_LABEL[r.final_state] || r.final_state || "—")}</span>${
-              r.error_code?`<div class="err-sub">${esc(r.error_code)}</div>`:""}</td>
+              r.error_code?`<div class="err-sub err-clr" data-job="${esc(r.job_id)}"
+                title="${t("wrong error? click to clear it")}">${esc(r.error_code)}</div>`:""}</td>
         <td class="num">${r.total_layers ?? "—"}</td>
         <td class="num${running ? " dur" : ""}" ${running
             ? `data-job="${esc(r.job_id)}" title="${t("never finished — click to set how long it took")}"` : ""}>${
