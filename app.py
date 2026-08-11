@@ -339,8 +339,10 @@ def _persist_print(state: dict) -> None:
             snap = _ams_bambu_map(state)
             if snap:
                 blob = json.dumps(snap)
-                store.update_print_fields(tid, ams_bambu=blob)
+                slots = json.dumps(_ams_slot_map(state))
+                store.update_print_fields(tid, ams_bambu=blob, ams_slots=slots)
                 _print_row["stored"]["ams_bambu"] = blob
+                _print_row["stored"]["ams_slots"] = slots
     except Exception as e:
         print(f"[prints] upsert failed: {e}")
 
@@ -869,12 +871,24 @@ def _filament_stats() -> dict:
     except Exception:
         known = {}
 
+    # An identity folded into another by hand. Followed with a hop limit so a
+    # cycle can't hang the page - a -> b -> a is a user's mistake, not a crash.
+    def canon(k, hops=6):
+        seen = set()
+        while hops > 0 and k not in seen:
+            seen.add(k)
+            nxt = (known.get(k) or {}).get("alias_of")
+            if not nxt or nxt == k:
+                break
+            k, hops = nxt, hops - 1
+        return k
+
     agg = {}
     for r in prints:
         started = r.get("started_at")
         for e in _detail_entries(r):
-            fkey = filament_catalog.key(e.get("filament_id"), e.get("color"),
-                                        e.get("type"))
+            fkey = canon(filament_catalog.key(e.get("filament_id"), e.get("color"),
+                                              e.get("type")))
             a = agg.setdefault(fkey, {
                 "fkey": fkey, "filament_id": e.get("filament_id"),
                 "color": filament_catalog.norm_color(e.get("color")),
@@ -895,6 +909,8 @@ def _filament_stats() -> dict:
 
     # spools seen in the AMS but never printed with yet still belong on the page
     for fkey, f in known.items():
+        if f.get("alias_of"):
+            continue                    # folded into another row
         agg.setdefault(fkey, {
             "fkey": fkey, "filament_id": f.get("filament_id"),
             "color": f.get("color"), "type": f.get("type"),
@@ -958,8 +974,8 @@ def _filament_stats() -> dict:
         for tr in trays:
             if tr.get("type"):
                 loaded.setdefault(
-                    filament_catalog.key(tr.get("filament_id"), tr.get("color"),
-                                         tr.get("type")), (tr, ext))
+                    canon(filament_catalog.key(tr.get("filament_id"), tr.get("color"),
+                                               tr.get("type"))), (tr, ext))
 
     total_g = sum(a["grams"] for a in agg.values()) or 0.0
     out = []
@@ -1062,6 +1078,29 @@ def _filament_stats() -> dict:
         fk = p.pop("_fkey", None)
         if fk:
             p["matched_name"] = names.get(fk)
+    # Likely duplicates: same colour and same material, one side named from an
+    # RFID read and the other not. Suggested, never applied - two genuinely
+    # different blacks look identical by this test, and merging them silently
+    # would be worse than leaving two rows. Naming the stray also clears it.
+    suggest = []
+    named = [o for o in out if o.get("color") and (o.get("color_name") or o.get("product"))]
+    for o in out:
+        if o.get("color_name") or o.get("product") or not o.get("color"):
+            continue
+        for n in named:
+            if n["fkey"] == o["fkey"] or n["color"] != o["color"]:
+                continue
+            if (n.get("type") or "").upper() != (o.get("type") or "").upper():
+                continue
+            suggest.append({
+                "from": o["fkey"], "from_grams": o["grams"],
+                "into": n["fkey"], "into_grams": n["grams"],
+                "color": o["color"], "type": o.get("type"),
+                "name": " ".join(x for x in (n.get("vendor"), n.get("product"),
+                                             n.get("color_name")) if x),
+            })
+            break
+
     spent = sum(float(p.get("total_price") or 0) for p in purchases)
     bought_g = sum(float(p.get("spools") or 1) * float(p.get("grams_each") or 1000)
                    for p in purchases)
@@ -1076,6 +1115,7 @@ def _filament_stats() -> dict:
         # SKU -> list price per kg, i.e. what per-print costing now uses
         "order_prices": dict(_ORDER_PRICES) if PRICES_FROM_ORDERS else {},
         "filaments": out,
+        "suggestions": suggest,
         "purchases": purchases,
         # logged but not attributable to any filament yet: usually a spool that
         # has never been in the AMS, or a wording the match didn't recognise
@@ -1090,6 +1130,28 @@ def _ams_bambu_map(state: dict) -> dict:
         for t in (unit.get("trays") or []):
             if t.get("id") is not None:
                 out[str(int(t["id"]) + 1)] = bool(t.get("is_bambu"))
+    return out
+
+
+def _ams_slot_map(state: dict) -> dict:
+    """{slot: what the AMS actually held}, captured while the print ran.
+
+    The cloud reports the slicer PROFILE per slot, not the spool: print a PLA
+    Matte reel with a PLA Basic profile and the job says GFA00 while the tag says
+    GFA01. Since the filament identity is built from that value, believing the
+    cloud splits one spool into two. This snapshot is the printer's own answer,
+    taken at the only moment it is true.
+    """
+    out = {}
+    for unit in ((state.get("ams") or {}).get("units") or []):
+        for t in (unit.get("trays") or []):
+            if t.get("id") is None or not t.get("type"):
+                continue
+            out[str(int(t["id"]) + 1)] = {
+                "sku": t.get("filament_id"), "color": filament_catalog.norm_color(t.get("color")),
+                "type": t.get("type"), "code": t.get("code"),
+                "bambu": bool(t.get("is_bambu")),
+            }
     return out
 
 
@@ -1175,6 +1237,10 @@ def _apply_cloud_task(task: dict) -> bool:
         bambu_map = json.loads(row.get("ams_bambu") or "{}")
     except (TypeError, ValueError):
         bambu_map = {}
+    try:
+        slot_map = json.loads(row.get("ams_slots") or "{}")
+    except (TypeError, ValueError):
+        slot_map = {}
 
     mapping = task.get("amsDetailMapping") or []
     detail, fil_cost = [], 0.0
@@ -1183,11 +1249,18 @@ def _apply_cloud_task(task: dict) -> bool:
         per_kg, rule = _filament_price_per_kg(e, bambu_map)
         fil_cost += grams / 1000.0 * per_kg
         slot = (e.get("slotId") or 0) + 1
+        # What the AMS held beats what the plate was sliced with. Identity is
+        # built from these three, so trusting the profile splits one spool into
+        # one row per profile it was ever printed with.
+        snap = slot_map.get(str(slot)) or {}
         detail.append({
             "slot": slot,
-            "type": e.get("filamentType"),
-            "filament_id": e.get("filamentId"),
-            "color": (e.get("targetColor") or "")[:6] or None,
+            "type": snap.get("type") or e.get("filamentType"),
+            "filament_id": snap.get("sku") or e.get("filamentId"),
+            "code": snap.get("code"),
+            # normalised, not sliced: '#RRGGBB' would come out as '#RRGGB' and
+            # key a second, phantom identity for the same filament
+            "color": snap.get("color") or filament_catalog.norm_color(e.get("targetColor")),
             "brand": ("Bambu" if bambu_map.get(str(slot)) else "third-party")
                      if str(slot) in bambu_map else "unknown",
             "grams": round(grams, 2),
@@ -1568,6 +1641,44 @@ def api_filament_identity():
         if row and row.get("code"):
             _learn_color(row["code"], fields["color_name"])
     return jsonify({"ok": True, "fkey": fkey, **fields})
+
+
+@app.route("/api/filaments/merge", methods=["POST"])
+def api_filament_merge():
+    """Fold one filament identity into another, or undo that with a blank
+    `into`. Usage, cost and purchases follow; nothing is rewritten in the print
+    rows, so unmerging puts everything back exactly as it was."""
+    data = request.get_json(force=True, silent=True) or {}
+    src = (data.get("from") or "").strip()
+    dst = (data.get("into") or "").strip()
+    shape = r"[A-Za-z0-9._-]{1,24}\|([0-9A-Fa-f]{6}|\?)"
+    if not re.fullmatch(shape, src):
+        return jsonify({"ok": False, "error": "not a filament identity"}), 400
+    if dst and not re.fullmatch(shape, dst):
+        return jsonify({"ok": False, "error": "not a filament identity"}), 400
+    if dst == src:
+        return jsonify({"ok": False, "error": "cannot merge into itself"}), 400
+    try:
+        known = {f["fkey"]: f for f in store.all_filaments()}
+        # walking the chain first stops a -> b -> a, which would hide both rows
+        hop, seen = dst, set()
+        while hop and hop not in seen:
+            seen.add(hop)
+            if hop == src:
+                return jsonify({"ok": False, "error": "that would make a loop"}), 400
+            hop = (known.get(hop) or {}).get("alias_of")
+        if src not in known:
+            sku, _, hexc = src.partition("|")
+            store.upsert_filament(
+                src, filament_id=sku if sku.upper().startswith("GF") else None,
+                type=None if sku.upper().startswith("GF") else sku,
+                color=filament_catalog.norm_color(hexc))
+        store.set_filament_alias(src, dst or None)
+    except Exception as e:
+        print(f"[filament] merge failed: {e}")
+        return jsonify({"ok": False, "error": str(e)[:300]}), 500
+    print(f"[filament] {src} -> {dst or '(unmerged)'}")
+    return jsonify({"ok": True, "from": src, "into": dst or None})
 
 
 @app.route("/api/purchases", methods=["POST"])

@@ -33,14 +33,14 @@ LATE_COLUMNS = {
                "filament_detail": "TEXT", "filament_cost": "FLOAT",
                "ams_bambu": "TEXT", "error_code": "VARCHAR(64)",
                "design_id": "VARCHAR(32)", "profile_id": "VARCHAR(32)",
-               "pgroup": "VARCHAR(120)"},
+               "pgroup": "VARCHAR(120)", "ams_slots": "TEXT"},
     # `code` arrived with invoice import, one release after the table itself.
     # CREATE TABLE IF NOT EXISTS silently does nothing to an existing table, so
     # every column added later has to be listed here or the INSERT breaks.
     "purchases": {"code": "VARCHAR(24)", "list_price": "FLOAT"},
     # who made it. The RFID tag only says genuine-or-not, never a manufacturer,
     # so for third-party spools this can only come from the user.
-    "filaments": {"vendor": "VARCHAR(64)"},
+    "filaments": {"vendor": "VARCHAR(64)", "alias_of": "VARCHAR(64)"},
     # notes shipped before they had categories
     "notes": {"category": "VARCHAR(60)"},
 }
@@ -49,7 +49,7 @@ PRINT_COLS = ["job_id", "name", "started_at", "ended_at", "final_state",
               "total_layers", "energy_wh", "cost", "peak_w", "label",
               "design_title", "filament_g", "filament_g_manual",
               "filament_detail", "filament_cost", "ams_bambu", "error_code",
-              "design_id", "profile_id", "pgroup"]
+              "design_id", "profile_id", "pgroup", "ams_slots"]
 
 # Never touched by upsert_print's UPDATE branch (which runs from the MQTT loop):
 #   started_at        - so a restart mid-print can't rewrite when the job began
@@ -58,16 +58,19 @@ PRINT_COLS = ["job_id", "name", "started_at", "ended_at", "final_state",
 #   design_title / filament_* - owned by the cloud updater; the MQTT path knows
 #                       nothing about them and would otherwise null them out
 #   pgroup            - user-assigned group, same reasoning as label
+#   ams_slots         - what the AMS held while the print ran, written once
 PRINT_IMMUTABLE = {"job_id", "started_at", "label", "design_title",
                    "filament_g", "filament_g_manual", "filament_detail",
-                   "filament_cost", "ams_bambu", "error_code", "pgroup"}
+                   "filament_cost", "ams_bambu", "error_code", "pgroup",
+                   "ams_slots"}
 
 # Identity of every filament ever seen in the AMS, so the Filament page can name
 # a spool long after it has been used up and removed. Usage figures are NOT here:
 # those are aggregated from prints.filament_detail, which already has them for
 # every past print (see app._filament_stats).
 FILAMENT_COLS = ["fkey", "filament_id", "code", "vendor", "product", "color",
-                 "color_name", "type", "is_bambu", "first_seen", "last_seen"]
+                 "color_name", "type", "is_bambu", "alias_of",
+                 "first_seen", "last_seen"]
 
 # What was bought, as opposed to what was used. Kept as one row per order LINE
 # (not per spool) so an order of 3 spools stays one editable, deletable entry.
@@ -176,7 +179,7 @@ class Storage:
                 fkey VARCHAR(64) PRIMARY KEY,
                 filament_id VARCHAR(16), code VARCHAR(24), vendor VARCHAR(64),
                 product VARCHAR(64), color VARCHAR(8), color_name VARCHAR(64),
-                type VARCHAR(24), is_bambu INT,
+                type VARCHAR(24), is_bambu INT, alias_of VARCHAR(64),
                 first_seen DOUBLE, last_seen DOUBLE
             )""")
         cur.execute(f"""
@@ -431,6 +434,23 @@ class Storage:
         conn, cur = self._cursor()
         cur.execute(f"UPDATE filaments SET {sets} WHERE fkey={self.ph}",
                     list(fields.values()) + [fkey])
+        n = cur.rowcount
+        if self.backend == "sqlite":
+            conn.commit()
+        else:
+            cur.close(); conn.close()
+        return n > 0
+
+    def set_filament_alias(self, fkey: str, target: str | None) -> bool:
+        """Fold one identity into another, or (target None) stop folding it.
+
+        Needed because the two sources of an identity can disagree: the cloud
+        reports the slicer PROFILE, not what was in the tray, so one spool can
+        show up under several SKUs. An alias says "these are one filament".
+        """
+        conn, cur = self._cursor()
+        cur.execute(f"UPDATE filaments SET alias_of={self.ph} WHERE fkey={self.ph}",
+                    (target or None, fkey))
         n = cur.rowcount
         if self.backend == "sqlite":
             conn.commit()

@@ -533,6 +533,29 @@
   .grp-name{font-weight:680; font-size:13px}
   .grp-sum{margin-left:auto; font-size:11.5px; color:var(--text-3); font-weight:550;
     font-variant-numeric:tabular-nums}
+  #filHead{flex-wrap:wrap; row-gap:8px; align-items:center}
+  .filt-in{font:inherit; font-size:12.5px; width:min(240px,100%); padding:6px 11px;
+    border-radius:999px; border:1px solid var(--border-strong);
+    background:var(--surface-2); color:var(--text); outline:none}
+  .filt-in:focus{border-color:var(--accent)}
+  /* sortable headers */
+  .htab th.srt{cursor:pointer; user-select:none; white-space:nowrap}
+  .htab th.srt:hover{color:var(--text)}
+  .htab th.srt .ar{opacity:0; margin-left:3px; font-size:9px}
+  .htab th.srt.on{color:var(--accent)}
+  .htab th.srt.on .ar{opacity:1}
+
+  /* suggested duplicate identities */
+  .dupes{border:1px solid var(--warn); background:rgba(217,119,6,.08);
+    border-radius:12px; padding:11px 13px; margin-bottom:14px}
+  .dupes h4{margin:0 0 4px; font-size:12px; font-weight:700; letter-spacing:.05em;
+    text-transform:uppercase; color:var(--warn)}
+  .dupes .dnote{font-size:11.5px; color:var(--text-3); margin-bottom:9px}
+  .dupe{display:flex; align-items:center; gap:9px; flex-wrap:wrap; font-size:12.5px;
+    padding:6px 0; border-top:1px solid var(--border)}
+  .dupe:first-of-type{border-top:0}
+  .dupe .arrow{color:var(--text-3)}
+  .dupe .wbtn{margin-left:auto}
   .htab .shr{width:110px}
   .htab .shr .mt{display:block; height:7px; border-radius:4px; background:var(--surface-2); overflow:hidden}
   .htab .shr .mt>span{display:block; height:100%; background:var(--accent); border-radius:4px}
@@ -965,9 +988,18 @@
       <div class="kpis" id="filKpis"></div>
     </section>
     <section class="card span-12">
-      <div class="card-head">
+      <div class="card-head" id="filHead">
         <h3 data-i18n="Consumption">Consumption</h3><span class="meta" id="filMeta"></span>
+        <input id="filSearch" class="filt-in" style="margin-left:auto"
+               data-i18n-ph="Search vendor, colour, code…">
+        <span class="seg" id="filScopeSeg">
+          <button data-s="all" data-i18n="All">All</button>
+          <button data-s="ams" data-i18n="In AMS">In AMS</button>
+          <button data-s="low" data-i18n="Low">Low</button>
+          <button data-s="unused" data-i18n="unused">unused</button>
+        </span>
       </div>
+      <div id="filDupes"></div>
       <div style="overflow-x:auto">
         <table class="htab" id="filTable"><tbody></tbody></table>
       </div>
@@ -1196,6 +1228,14 @@ const DE = {
   "That is not an image.":"Das ist kein Bild.",
   "That image is too large.":"Das Bild ist zu groß.",
   "picture(s) could not be uploaded":"Bild(er) konnten nicht hochgeladen werden",
+  "Search vendor, colour, code…":"Hersteller, Farbe, Code suchen…",
+  "In AMS":"Im AMS", "Nothing matches that filter.":"Nichts passt zu diesem Filter.",
+  "possible duplicate":"möglicher Doppeleintrag",
+  "possible duplicates":"mögliche Doppeleinträge",
+  "Same colour and material, but only one of them is named — usually one spool printed under two slicer profiles.":
+    "Gleiche Farbe und gleiches Material, aber nur einer ist benannt – meist eine Spule, die unter zwei Slicer-Profilen gedruckt wurde.",
+  "Merge":"Zusammenführen", "Merged":"Zusammengeführt",
+  "Could not merge.":"Zusammenführen fehlgeschlagen.",
   "Vendor":"Hersteller", "unknown":"unbekannt",
   "click to set the vendor":"klicken, um den Hersteller zu setzen",
   "click to name this filament":"klicken, um das Filament zu benennen",
@@ -2520,7 +2560,65 @@ $("spools").addEventListener("click", e=>{
   if(b) openAssign(+b.dataset.slot);
 });
 
-/* ---------- filament ---------- */
+/* ---------- filament ----------
+   Filtering and sorting happen on the payload already in hand, so neither the
+   server nor the page is refetched to reorder a table. */
+let filPayload = null, filSearch = "";
+let filScope = localStorage.getItem("bambu-filscope") || "all";
+let filSort = {key: "grams", dir: -1};      // matches what the API sorts by
+try{ filSort = JSON.parse(localStorage.getItem("bambu-filsort")) || filSort; }catch(_){}
+
+const FIL_KEYS = {
+  vendor:    f=> (f.vendor || "").toLowerCase(),
+  name:      f=> `${f.product || f.type || ""} ${f.color_name || f.code || f.color || ""}`.toLowerCase(),
+  type:      f=> (f.type || "").toLowerCase(),
+  grams:     f=> f.grams,
+  bought_g:  f=> f.bought_g,
+  left_g:    f=> f.left_g,
+  cost:      f=> f.cost,
+  prints:    f=> f.prints,
+  last_used: f=> f.last_used,
+};
+function filCompare(a, b){
+  const get = FIL_KEYS[filSort.key] || FIL_KEYS.grams;
+  const x = get(a), y = get(b);
+  // missing values sink to the bottom whichever way the column is sorted -
+  // "no data" is not a small number
+  const nx = x == null || x === "", ny = y == null || y === "";
+  if(nx || ny) return nx && ny ? 0 : (nx ? 1 : -1);
+  const c = typeof x === "string" ? x.localeCompare(y) : (x - y);
+  return c * filSort.dir || a.fkey.localeCompare(b.fkey);
+}
+function filMatches(f){
+  if(filScope === "ams"    && !f.loaded) return false;
+  if(filScope === "low"    && !f.low)    return false;
+  if(filScope === "unused" && !f.unused) return false;
+  if(!filSearch) return true;
+  return [f.vendor, f.product, f.color_name, f.code, f.type, f.color, f.filament_id]
+         .filter(Boolean).join(" ").toLowerCase().includes(filSearch);
+}
+$("filSearch").addEventListener("input", e=>{
+  filSearch = e.target.value.trim().toLowerCase();
+  renderFilTable();
+});
+$("filScopeSeg").addEventListener("click", e=>{
+  if(e.target.tagName !== "BUTTON") return;
+  filScope = e.target.dataset.s;
+  localStorage.setItem("bambu-filscope", filScope);
+  renderFilTable();
+});
+$("filTable").addEventListener("click", e=>{
+  const th = e.target.closest("th.srt");
+  if(!th) return;
+  const key = th.dataset.sort;
+  // same column flips direction; a new one starts the way that column reads
+  // best - biggest first for numbers, A-Z for words
+  filSort = filSort.key === key ? {key, dir: -filSort.dir}
+          : {key, dir: ["vendor","name","type"].includes(key) ? 1 : -1};
+  localStorage.setItem("bambu-filsort", JSON.stringify(filSort));
+  renderFilTable();
+});
+
 // Name a filament as precisely as the data allows: product line + colour name
 // for an RFID spool, down to bare material + hex for one the AMS never saw.
 function filName(f){
@@ -2598,9 +2696,42 @@ $("filTable").addEventListener("click", e=>{
                               {product: v.product, color_name: v.color_name}));
   }
 });
+/* One spool can arrive under several identities, because the cloud reports the
+   slicer PROFILE per slot rather than what was in the tray. These are offered,
+   never applied: two different blacks look identical to this test. Naming the
+   stray identity also makes the suggestion go away. */
+function renderDupes(list){
+  if(!list.length){ $("filDupes").innerHTML = ""; return; }
+  $("filDupes").innerHTML = `<div class="dupes">
+    <h4>${list.length} ${t(list.length===1 ? "possible duplicate" : "possible duplicates")}</h4>
+    <div class="dnote">${t("Same colour and material, but only one of them is named — usually one spool printed under two slicer profiles.")}</div>
+    ${list.map(s=>`<div class="dupe">
+      <span class="swatch" style="--sw:#${esc(s.color)}"></span>
+      <span><code>${esc(s.from)}</code> · ${s.from_grams} g</span>
+      <span class="arrow">→</span>
+      <span><b>${esc(s.name)}</b> · ${s.into_grams} g</span>
+      <button class="wbtn" data-from="${esc(s.from)}" data-into="${esc(s.into)}"
+        >${t("Merge")}</button>
+    </div>`).join("")}
+  </div>`;
+}
+$("filDupes").addEventListener("click", async e=>{
+  const b = e.target.closest("button.wbtn");
+  if(!b) return;
+  let d = null;
+  try{
+    d = await (await fetch("/api/filaments/merge", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({from: b.dataset.from, into: b.dataset.into})})).json();
+  }catch(_){}
+  if(!d || !d.ok) toast(t("Could not merge.") + (d && d.error ? " ("+d.error+")" : ""), true);
+  else toast(t("Merged"));
+  loadFilaments();
+});
 async function loadFilaments(){
   let d;
   try{ d = await (await fetch("/api/filaments")).json(); }catch(_){ return; }
+  filPayload = d;
   const cur = d.currency||"€", tt = d.totals||{}, rows = d.filaments||[];
   filKnown = rows.filter(f=> f.product || f.color_name);
   $("filKpis").innerHTML = [
@@ -2610,21 +2741,39 @@ async function loadFilaments(){
     ["Different filaments", tt.filaments ?? 0, tt.unused ? `${tt.unused} ${t("unused")}` : ""],
     ["Prints with data", tt.prints ?? 0, ""],
   ].map(([l,v,s])=>`<div class="kpi"><span class="kl">${t(l)}</span><span class="kv">${v}</span><span class="ks">${s}</span></div>`).join("");
+  renderDupes(d.suggestions || []);
   renderPurchases(d);
+  renderFilTable();
+}
+function renderFilTable(){
+  const d = filPayload;
+  if(!d) return;
+  const cur = d.currency||"€", all = d.filaments||[];
   const tb = $("filTable").querySelector("tbody");
-  if(!rows.length){
+  document.querySelectorAll("#filScopeSeg button").forEach(b=>
+    b.classList.toggle("on", b.dataset.s === filScope));
+  if(!all.length){
     tb.innerHTML = `<tr><td style="color:var(--text-3);padding:10px 0">${t("Nothing recorded yet — filament appears here once a print with slot data finishes.")}</td></tr>`;
     $("filMeta").textContent = ""; return;
   }
+  const rows = all.filter(filMatches).sort(filCompare);
   const loaded = rows.filter(f=>f.loaded).length;
-  $("filMeta").textContent = `${rows.length} ${t("filaments")} · ${loaded} ${t("in the AMS")}`;
+  $("filMeta").textContent =
+    (rows.length === all.length ? `${all.length} ${t("filaments")}`
+                                : `${rows.length} ${t("of")} ${all.length} ${t("filaments")}`)
+    + ` · ${loaded} ${t("in the AMS")}`;
+  const th = (key, label, cls)=>{
+    const on = filSort.key === key;
+    return `<th class="${cls||""} srt${on?" on":""}" data-sort="${key}">${label}<span class="ar">${
+      on && filSort.dir > 0 ? "▲" : "▼"}</span></th>`;
+  };
   tb.innerHTML =
-    `<tr><th>${t("Vendor")}</th><th>${t("Filament")}</th><th>${t("Type")}</th>
-         <th class="num">${t("Used")}</th><th>${t("Share")}</th>
-         <th class="num">${t("Bought")}</th><th class="num">${t("Left")}</th>
-         <th class="num">${t("Cost")}</th><th class="num">${t("Prints")}</th>
-         <th>${t("Last used")}</th><th>${t("Status")}</th><th class="del"></th></tr>` +
-    rows.map(f=>{
+    `<tr>${th("vendor", t("Vendor"))}${th("name", t("Filament"))}${th("type", t("Type"))}
+         ${th("grams", t("Used"), "num")}<th>${t("Share")}</th>
+         ${th("bought_g", t("Bought"), "num")}${th("left_g", t("Left"), "num")}
+         ${th("cost", t("Cost"), "num")}${th("prints", t("Prints"), "num")}
+         ${th("last_used", t("Last used"))}<th>${t("Status")}</th><th class="del"></th></tr>` +
+    (rows.length ? rows.map(f=>{
       const n = filName(f);
       const last = f.last_used
         ? new Date(f.last_used*1000).toLocaleDateString([], {year:"numeric",month:"2-digit",day:"2-digit"})
@@ -2657,7 +2806,9 @@ async function loadFilaments(){
           ? `<a class="reorder" href="${esc(f.store_url)}" target="_blank" rel="noopener noreferrer"
                title="${t("search the Bambu store")}">${t("Reorder")} ↗</a>` : ""}</td>
       </tr>`;
-    }).join("");
+    }).join("")
+    : `<tr><td colspan="12" style="color:var(--text-3);padding:10px 0">${
+        t("Nothing matches that filter.")}</td></tr>`);
 }
 
 /* ---------- purchases ----------

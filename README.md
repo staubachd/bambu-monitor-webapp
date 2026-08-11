@@ -125,6 +125,10 @@ per print must be accurate)
   colour code. Genuine spools show *Bambu Lab* without anyone typing it
 - Shows which filaments are **in the AMS right now** (slot, remaining %, Low flag)
   with the same **Reorder ↗** link, so the page doubles as a shopping list
+- **Search and sort**: type to match vendor, product, colour name, colour code,
+  hex or material; narrow to *In AMS · Low · unused*; click any column header to
+  sort by it. Both are applied to the data already loaded — no refetch — and the
+  scope and sort column are remembered
 - A **purchase log**: drop a Bambu **invoice PDF** on the page and it reads the
   line items straight out of the invoice table — product, colour code, colour
   name, quantity, weight and the price *actually paid* after discounts. Pasting
@@ -352,6 +356,7 @@ Design constraints that shaped these choices:
 | `tools/capture_sample.py`     | Captures a real report to `samples/sample_report.json` for offline parser testing. |
 | `tools/explore_ftps.py`       | Explores the printer's FTPS file store (models/thumbnails).            |
 | `tools/dump_cloud_tasks.py`   | Read-only: cloud tasks next to the stored prints. Diagnoses why an orphaned print didn't close. |
+| `tools/dump_filaments.py`     | Read-only: every filament identity, where it came from, and which look like the same spool split in two. |
 | `samples/`                    | Captured payloads used by `bambu_state.py`'s self-test (not committed).  |
 | **`deploy/`**                 |                                                                         |
 | `deploy/start.sh`             | Idempotent POSIX launcher (pidfile + `kill -0`), supports a `restart` arg. |
@@ -597,6 +602,7 @@ printer (and re-enable LAN Mode Live View, which a reboot can revert).
 | `GET /api/notes/image/<id>`| The picture bytes, cached immutably.                                |
 | `POST /api/notes/image/delete` | Remove one picture `{ "id": … }`.                               |
 | `GET /api/filaments`       | Per-filament consumption (grams, cost, prints, share, last used) joined with the stored identities, the purchase log and what is loaded in the AMS right now. |
+| `POST /api/filaments/merge` | Fold one identity into another `{ "from": …, "into": … }`; a blank `into` unmerges. Refuses self-merges and alias loops. |
 | `POST /api/filaments/identity` | Name a filament `{ "fkey": …, "vendor": …, "product": …, "color_name": … }`. Creates the identity row if only the print history knew it; empty values clear a field. |
 | `POST /api/purchases`      | Log one or more order lines `{ "lines": [ … ] }` (or a single line object). |
 | `POST /api/purchases/parse`| Read an order: an uploaded invoice PDF (`multipart`, field `file`) or pasted text (`{ "text": … }`). **Stores nothing** — returns suggested lines for the user to confirm. |
@@ -773,6 +779,18 @@ A few behaviours are non-obvious because the printer's raw data is messy:
 - **"Left" can go negative.** Bought minus used, shown as-is rather than clamped:
   a negative simply means orders from before the log existed are missing, and
   hiding that would make the number look trustworthy when it isn't.
+
+- **The cloud reports the slicer profile, not what was in the tray.** Print a PLA
+  Matte reel with a PLA Basic profile and the job says `GFA00` while the RFID tag
+  says `GFA01` — one spool, two identities, the tag's carrying the name and the
+  job's carrying the grams. Two answers: `prints.ams_slots` now snapshots what
+  the AMS actually held (SKU, colour, code, material per slot) while the print
+  ran, and enrichment builds the identity from that in preference to the profile;
+  and identities can be **merged** by hand, folding usage, cost and purchases into
+  one row. The page suggests likely pairs — same colour, same material, one side
+  unnamed — but never merges on its own, because two different blacks look
+  identical to that test. Merging is an alias, so unmerging restores both rows
+  exactly; nothing in the print rows is rewritten.
 
 - **One filament = SKU + colour, not one spool.** `GFA00|FFFFFF` is the only key
   the live AMS and the cloud's per-print detail both carry. Two spools of the same
