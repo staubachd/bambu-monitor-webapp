@@ -39,11 +39,21 @@ store = Storage(scfg)
 cat = {f["fkey"]: f for f in store.all_filaments()}
 used: dict = {}
 raw_colours: dict = {}
+unattributed = []          # grams the Filament page cannot place
 for p in store.all_prints():
     try:
         entries = json.loads(p.get("filament_detail") or "[]") or []
     except (TypeError, ValueError):
-        continue
+        entries = []
+    grams = p.get("filament_g_manual")
+    if grams is None:
+        grams = p.get("filament_g")
+    if grams and not entries:
+        # History and Statistics use this per-print total; the Filament page
+        # sums the per-slot breakdown, so a print with one and not the other is
+        # counted on two pages out of three
+        unattributed.append((p.get("job_id"), p.get("started_at"), grams,
+                             p.get("label") or p.get("design_title") or p.get("name") or ""))
     for e in entries:
         k = fc.key(e.get("filament_id"), e.get("color"), e.get("type"))
         u = used.setdefault(k, {"grams": 0.0, "prints": 0, "last": None})
@@ -93,3 +103,54 @@ for sku, ks in sorted(by_sku.items()):
         print("    -> same product, different colour string on the two sides")
 if not flagged:
     print("no split identities found - every SKU's colours are consistently named")
+
+print()
+if unattributed:
+    tot = sum(u[2] for u in unattributed)
+    print(f"{len(unattributed)} print(s) carry grams the Filament page cannot place "
+          f"({tot:.1f} g in total):")
+    for job, started, grams, name in sorted(unattributed, key=lambda u: -(u[1] or 0)):
+        when = datetime.fromtimestamp(started).strftime("%Y-%m-%d") if started else "?"
+        print(f"    {job:12} {when}  {grams:8.1f} g  {name[:38]}")
+    print("    -> the cloud gave a total weight but no per-slot breakdown, so the")
+    print("       History and Statistics tabs count these grams and Filament does not")
+else:
+    print("every print's grams are attributed to a filament")
+
+# --- what each recent print was credited to, and what the AMS held ------------
+n = 6
+for a in sys.argv[1:]:
+    if a.isdigit():
+        n = int(a)
+recent = sorted(store.all_prints(), key=lambda p: -(p.get("started_at") or 0))[:n]
+print(f"\nlast {len(recent)} prints - what each slot was credited to:")
+for p in recent:
+    when = (datetime.fromtimestamp(p["started_at"]).strftime("%Y-%m-%d %H:%M")
+            if p.get("started_at") else "?")
+    name = (p.get("label") or p.get("design_title") or p.get("name") or "")[:34]
+    print(f"\n  {p['job_id']}  {when}  {name}")
+    try:
+        entries = json.loads(p.get("filament_detail") or "[]") or []
+    except (TypeError, ValueError):
+        entries = []
+    try:
+        slots = json.loads(p.get("ams_slots") or "{}") or {}
+    except (TypeError, ValueError):
+        slots = {}
+    if not entries:
+        print(f"      no per-slot detail (total {p.get('filament_g')} g)")
+    for e in entries:
+        s = str(e.get("slot"))
+        snap = slots.get(s) or {}
+        k = fc.key(e.get("filament_id"), e.get("color"), e.get("type"))
+        named = cat.get(k, {})
+        who = " ".join(x for x in (named.get("vendor"), named.get("product"),
+                                   named.get("color_name")) if x) or "unnamed"
+        print(f"      slot {s}: {e.get('grams')} g -> {k}  ({who})")
+        if snap:
+            flag = "" if (snap.get("color") or "") == (e.get("color") or "") \
+                   else "   <-- MISMATCH, the AMS held a different colour"
+            print(f"              AMS then: {snap.get('sku')}|{snap.get('color')}"
+                  f" {snap.get('code') or ''}{flag}")
+        elif slots:
+            print(f"              AMS then: (no snapshot for slot {s})")

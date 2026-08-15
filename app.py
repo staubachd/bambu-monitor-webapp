@@ -1034,6 +1034,8 @@ def _filament_stats() -> dict:
             "color": a.get("color") or meta.get("color"),
             "is_bambu": is_bambu,
             "first_seen": meta.get("first_seen"),
+            # identities folded into this one, so a merge can be undone
+            "merged": sorted(k for k, f in known.items() if f.get("alias_of") == fkey),
             # ids 254/255 are the virtual external slots, not a real AMS bay
             "slot": None if (ext or not tr or tr.get("id") is None) else tr["id"] + 1,
             "external": bool(tr) and ext,
@@ -1265,18 +1267,26 @@ def _apply_cloud_task(task: dict) -> bool:
         per_kg, rule = _filament_price_per_kg(e, bambu_map)
         fil_cost += grams / 1000.0 * per_kg
         slot = (e.get("slotId") or 0) + 1
-        # What the AMS held beats what the plate was sliced with. Identity is
-        # built from these three, so trusting the profile splits one spool into
-        # one row per profile it was ever printed with.
+        # The AMS snapshot exists to correct the SKU: the cloud reports the
+        # slicer PROFILE, so one spool otherwise appears once per profile it was
+        # printed with. The COLOUR from the cloud has always been right, so it
+        # stays authoritative - and it doubles as a check on the snapshot. If the
+        # two disagree about the colour, the slot numbering doesn't line up and
+        # the snapshot would credit the wrong spool entirely, so it is dropped.
+        cloud_color = filament_catalog.norm_color(e.get("targetColor"))
         snap = slot_map.get(str(slot)) or {}
+        if snap.get("color") and cloud_color and snap["color"] != cloud_color:
+            print(f"[cloud] slot {slot}: AMS had #{snap['color']}, job says "
+                  f"#{cloud_color} - ignoring the snapshot for this line")
+            snap = {}
         detail.append({
             "slot": slot,
-            "type": snap.get("type") or e.get("filamentType"),
+            "type": e.get("filamentType") or snap.get("type"),
             "filament_id": snap.get("sku") or e.get("filamentId"),
             "code": snap.get("code"),
             # normalised, not sliced: '#RRGGBB' would come out as '#RRGGB' and
             # key a second, phantom identity for the same filament
-            "color": snap.get("color") or filament_catalog.norm_color(e.get("targetColor")),
+            "color": cloud_color or snap.get("color"),
             "brand": ("Bambu" if bambu_map.get(str(slot)) else "third-party")
                      if str(slot) in bambu_map else "unknown",
             "grams": round(grams, 2),
@@ -1657,6 +1667,40 @@ def api_filament_identity():
         if row and row.get("code"):
             _learn_color(row["code"], fields["color_name"])
     return jsonify({"ok": True, "fkey": fkey, **fields})
+
+
+@app.route("/api/filaments/delete", methods=["POST"])
+def api_filament_delete():
+    """Forget a filament identity.
+
+    Only ever removes the *identity* - the name, vendor and colour. Grams live
+    in the print rows, so an identity that has been printed with would simply
+    reappear unnamed, which is why that case is refused and pointed at merge.
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    fkey = (data.get("fkey") or "").strip()
+    if not fkey:
+        return jsonify({"ok": False, "error": "missing fkey"}), 400
+    grams = 0.0
+    try:
+        for r in store.all_prints():
+            for e in _detail_entries(r):
+                if filament_catalog.key(e.get("filament_id"), e.get("color"),
+                                        e.get("type")) == fkey:
+                    grams += e["grams"]
+    except Exception:
+        pass
+    if grams > 0:
+        return jsonify({"ok": False, "used": round(grams, 1), "error":
+                        f"{grams:.0f} g was printed with this - merge it into the "
+                        f"right filament instead, which keeps the grams"}), 409
+    try:
+        ok = store.delete_filament(fkey)
+    except Exception as e:
+        print(f"[filament] delete failed: {e}")
+        return jsonify({"ok": False, "error": str(e)[:300]}), 500
+    print(f"[filament] forgot identity {fkey}")
+    return jsonify({"ok": ok, "fkey": fkey})
 
 
 @app.route("/api/filaments/merge", methods=["POST"])

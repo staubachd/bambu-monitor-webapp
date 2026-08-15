@@ -545,6 +545,11 @@
   .htab th.srt.on{color:var(--accent)}
   .htab th.srt.on .ar{opacity:1}
 
+  .row-acts{display:flex; align-items:center; gap:6px; justify-content:flex-end}
+  .row-acts .del-btn{opacity:0}
+  .htab tr:hover .row-acts .del-btn{opacity:1}
+  @media(hover:none){ .row-acts .del-btn{opacity:.6} }
+
   /* suggested duplicate identities */
   .dupes{border:1px solid var(--warn); background:rgba(217,119,6,.08);
     border-radius:12px; padding:11px 13px; margin-bottom:14px}
@@ -1112,6 +1117,18 @@
 <!-- transient confirmation, bottom centre; aria-live so it is announced too -->
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
+<!-- merge picker: which filament is this one really? -->
+<div class="modal" id="mrgModal" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="mrgTitle">
+    <div class="card-head"><h3 id="mrgTitle" data-i18n="Merge into which filament?">Merge into which filament?</h3>
+      <span class="meta" id="mrgFrom"></span>
+      <button class="wbtn" id="mrgClose" style="margin-left:auto" data-i18n="Cancel">Cancel</button>
+    </div>
+    <div class="asg-list" id="mrgList"></div>
+    <div class="mnt-note" data-i18n="Both rows become one: grams, cost and purchases are added together. Nothing in the print history is rewritten, so this can be undone.">Both rows become one: grams, cost and purchases are added together. Nothing in the print history is rewritten, so this can be undone.</div>
+  </div>
+</div>
+
 <!-- slot assignment picker -->
 <div class="modal" id="asgModal" hidden>
   <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="asgTitle">
@@ -1238,6 +1255,21 @@ const DE = {
     "Gleiche Farbe und gleiches Material, aber nur einer ist benannt – meist eine Spule, die unter zwei Slicer-Profilen gedruckt wurde.",
   "Merge":"Zusammenführen", "Merged":"Zusammengeführt",
   "Could not merge.":"Zusammenführen fehlgeschlagen.",
+  "Unmerged":"Zusammenführung aufgehoben", "undo":"rückgängig",
+  "Merge into which filament?":"Mit welchem Filament zusammenführen?",
+  "same filament as another row? merge them":
+    "gleiches Filament wie eine andere Zeile? zusammenführen",
+  "forget this filament":"dieses Filament vergessen",
+  "identities folded into this one":"hier eingefaltete Identitäten",
+  "currently folded in":"aktuell eingefaltet", "…or fold this one into:":
+    "…oder diese hier einfalten in:",
+  "Nothing else to merge with.":"Nichts zum Zusammenführen vorhanden.",
+  "Both rows become one: grams, cost and purchases are added together. Nothing in the print history is rewritten, so this can be undone.":
+    "Beide Zeilen werden eine: Gramm, Kosten und Käufe werden addiert. Im Druckverlauf wird nichts geändert – das lässt sich rückgängig machen.",
+  "Forget this filament? Its name and vendor are removed.":
+    "Dieses Filament vergessen? Name und Hersteller werden entfernt.",
+  "Filament forgotten":"Filament vergessen",
+  "Could not forget it.":"Konnte nicht vergessen werden.",
   "Vendor":"Hersteller", "unknown":"unbekannt",
   "click to set the vendor":"klicken, um den Hersteller zu setzen",
   "click to name this filament":"klicken, um das Filament zu benennen",
@@ -2733,6 +2765,75 @@ function renderDupes(list){
     </div>`).join("")}
   </div>`;
 }
+/* Manual merge and forget. Merge is the answer whenever the wrong row has grams
+   against it - those live in the print rows and cannot be deleted from here, so
+   folding them into the right filament is the only way to end up with one row
+   that still adds up. */
+let mrgFrom = null;
+function closeMerge(){ $("mrgModal").hidden = true; mrgFrom = null; }
+$("mrgClose").addEventListener("click", closeMerge);
+$("mrgModal").addEventListener("click", e=>{ if(e.target === $("mrgModal")) closeMerge(); });
+document.addEventListener("keydown", e=>{
+  if(e.key === "Escape" && !$("mrgModal").hidden) closeMerge();
+});
+function openMerge(fkey){
+  const rows = (filPayload && filPayload.filaments) || [];
+  const me = rows.find(f=> f.fkey === fkey) || {};
+  mrgFrom = fkey;
+  $("mrgFrom").textContent = (me.product || me.type || "") + " · " + fkey;
+  const others = rows.filter(f=> f.fkey !== fkey && f.editable);
+  const item = (f, act)=>{
+    const n = filName(f);
+    return `<button class="asg-item" data-act="${act}" data-fkey="${esc(f.fkey || f)}">
+      <span class="swatch" style="--sw:#${esc((f.color)||"888888")}"></span>
+      <span><span class="an">${esc(f.vendor ? f.vendor+" · " : "")}${n.main}</span><br>
+        <span class="as">${n.sub} · ${f.grams||0} g</span></span>
+      <span class="acol">${act==="unmerge" ? t("undo") : ""}</span></button>`;
+  };
+  const undo = (me.merged||[]).map(k=>
+    `<button class="asg-item" data-act="unmerge" data-fkey="${esc(k)}">
+       <span class="swatch" style="--sw:#${esc(k.split("|")[1]||"888888")}"></span>
+       <span><span class="an">${esc(k)}</span><br>
+         <span class="as">${t("currently folded in")}</span></span>
+       <span class="acol">${t("undo")}</span></button>`).join("");
+  $("mrgList").innerHTML = (undo ? undo + `<div class="temp-sub" style="margin:6px 0">${
+      t("…or fold this one into:")}</div>` : "")
+    + (others.length ? others.map(f=> item(f, "merge")).join("")
+                     : `<div class="temp-sub">${t("Nothing else to merge with.")}</div>`);
+  $("mrgModal").hidden = false;
+}
+$("mrgList").addEventListener("click", async e=>{
+  const b = e.target.closest(".asg-item");
+  if(!b || !mrgFrom) return;
+  const body = b.dataset.act === "unmerge"
+    ? {from: b.dataset.fkey, into: ""}          // release the folded-in one
+    : {from: mrgFrom, into: b.dataset.fkey};
+  closeMerge();
+  let d = null;
+  try{
+    d = await (await fetch("/api/filaments/merge", {method:"POST",
+      headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)})).json();
+  }catch(_){}
+  if(!d || !d.ok) toast(t("Could not merge.") + (d && d.error ? " ("+d.error+")" : ""), true);
+  else toast(t(body.into ? "Merged" : "Unmerged"));
+  loadFilaments();
+});
+$("filTable").addEventListener("click", async e=>{
+  const b = e.target.closest("button.del-btn");
+  if(!b) return;
+  if(b.dataset.act === "merge"){ openMerge(b.dataset.fkey); return; }
+  if(!confirm(t("Forget this filament? Its name and vendor are removed.")
+              + "\n\n" + b.dataset.fkey)) return;
+  let d = null;
+  try{
+    d = await (await fetch("/api/filaments/delete", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({fkey: b.dataset.fkey})})).json();
+  }catch(_){}
+  if(!d || !d.ok) toast(t("Could not forget it.") + (d && d.error ? " — "+d.error : ""), true);
+  else toast(t("Filament forgotten"));
+  loadFilaments();
+});
 $("filDupes").addEventListener("click", async e=>{
   const b = e.target.closest("button.wbtn");
   if(!b) return;
@@ -2820,9 +2921,16 @@ function renderFilTable(){
         <td style="white-space:nowrap">${f.unused
           ? `<span class="tag tag-new" title="${t("bought, not printed with yet")}">${t("unused")}</span>`
           : filStatus(f)}</td>
-        <td class="del">${f.store_url
+        <td class="del"><span class="row-acts">${f.store_url
           ? `<a class="reorder" href="${esc(f.store_url)}" target="_blank" rel="noopener noreferrer"
-               title="${t("search the Bambu store")}">${t("Reorder")} ↗</a>` : ""}</td>
+               title="${t("search the Bambu store")}">${t("Reorder")} ↗</a>` : ""}${
+          f.editable ? `<button class="del-btn" data-act="merge" data-fkey="${esc(f.fkey)}"
+              title="${t("same filament as another row? merge them")}">⤵</button>
+            <button class="del-btn" data-act="del" data-fkey="${esc(f.fkey)}"
+              title="${t("forget this filament")}">✕</button>` : ""}${
+          (f.merged||[]).length ? `<span class="tag" title="${
+              t("identities folded into this one")}: ${esc((f.merged||[]).join(", "))}">${
+              f.merged.length}⤵</span>` : ""}</span></td>
       </tr>`;
     }).join("")
     : `<tr><td colspan="12" style="color:var(--text-3);padding:10px 0">${

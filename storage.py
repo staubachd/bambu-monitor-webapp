@@ -458,6 +458,19 @@ class Storage:
             cur.close(); conn.close()
         return n > 0
 
+    def delete_filament(self, fkey: str) -> bool:
+        """Forget an identity. Anything folded into it is unfolded first, so no
+        row is left pointing at something that no longer exists."""
+        conn, cur = self._cursor()
+        cur.execute(f"UPDATE filaments SET alias_of=NULL WHERE alias_of={self.ph}", (fkey,))
+        cur.execute(f"DELETE FROM filaments WHERE fkey={self.ph}", (fkey,))
+        n = cur.rowcount
+        if self.backend == "sqlite":
+            conn.commit()
+        else:
+            cur.close(); conn.close()
+        return n > 0
+
     def set_filament_color(self, fkey: str, color_name: str) -> bool:
         """Rename one identity's colour. Used when an invoice teaches the real
         name - Bambu's own wording outranks the built-in guess table and anything

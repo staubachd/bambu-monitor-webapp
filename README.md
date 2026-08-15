@@ -786,7 +786,12 @@ A few behaviours are non-obvious because the printer's raw data is messy:
   says `GFA01` — one spool, two identities, the tag's carrying the name and the
   job's carrying the grams. Two answers: `prints.ams_slots` now snapshots what
   the AMS actually held (SKU, colour, code, material per slot) while the print
-  ran, and enrichment builds the identity from that in preference to the profile;
+  ran, and enrichment takes the **SKU** from that in preference to the profile —
+  but never the colour. The cloud's colour has always been right, so it stays
+  authoritative *and* validates the snapshot: if the two disagree the slot
+  numbering doesn't line up, and the snapshot is dropped for that line rather
+  than crediting another spool. That guard matters because one real job reported
+  two different filaments both on slot 1;
   and identities can be **merged** by hand, folding usage, cost and purchases into
   one row. The page suggests likely pairs — same colour, same material, one side
   unnamed — but never merges on its own, because two different blacks look
