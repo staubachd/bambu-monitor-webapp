@@ -438,7 +438,7 @@ def _stats_block() -> dict:
     fin = fail = 0
     dur = eng = pcost = fil = mcost = 0.0
     durations = []
-    months, models = {}, {}
+    months, models, days = {}, {}, {}
     for r in prints:
         st = r.get("final_state")
         s, e = r.get("started_at"), r.get("ended_at")
@@ -463,6 +463,17 @@ def _stats_block() -> dict:
             mm["energy_wh"] += r.get("energy_wh") or 0
             mm["cost"] += pc + mc
             mm["filament_g"] += g
+            # A print is counted on the day it STARTED, so one job never lands
+            # in two buckets and the daily numbers still sum to the totals.
+            dk = datetime.fromtimestamp(s).strftime("%Y-%m-%d")
+            dd = days.setdefault(dk, {"day": dk, "prints": 0, "energy_wh": 0.0,
+                                      "cost": 0.0, "filament_g": 0.0, "seconds": 0.0})
+            dd["prints"] += 1
+            dd["energy_wh"] += r.get("energy_wh") or 0
+            dd["cost"] += pc + mc
+            dd["filament_g"] += g
+            if e and e > s:
+                dd["seconds"] += e - s
         name = r.get("design_title") or r.get("label") or r.get("name") or "—"
         mkey = r.get("design_id") or name
         md = models.setdefault(mkey, {"name": name, "design_id": r.get("design_id"),
@@ -493,6 +504,12 @@ def _stats_block() -> dict:
             "total_cost": round(pcost + mcost, 4),
         },
         "by_month": [months[k] for k in sorted(months)][-12:],
+        # a year of days; the page slices the window it wants to show
+        "by_day": [{**days[k], "energy_wh": round(days[k]["energy_wh"], 1),
+                    "cost": round(days[k]["cost"], 4),
+                    "filament_g": round(days[k]["filament_g"], 1),
+                    "seconds": round(days[k]["seconds"])}
+                   for k in sorted(days)][-370:],
         "top_models": sorted(models.values(), key=lambda x: -x["count"])[:8],
     }
 
@@ -596,6 +613,9 @@ def on_message(client, userdata, msg):
     # derive, don't hardcode: a message can still arrive during teardown after
     # the stream was switched off, and must not resurrect a stale "on" flag
     state["stream_enabled"] = _mqtt_enabled.is_set()
+    # which command families this firmware will accept, so the UI can offer only
+    # the controls that actually work
+    state["controls"] = {"gcode": CTRL_GCODE}
     state["power"] = dict(_power)
     state["cost"] = _cost_block()
     _track_print(state)
@@ -1437,7 +1457,34 @@ app = Flask(__name__)
 
 @app.route("/")
 def index():
-    return send_file(os.path.join(HERE, "dashboard.html"))
+    """The dashboard, explicitly never cached.
+
+    Deployment here is copying files over, so a browser holding on to a previous
+    dashboard.html silently undoes the copy - and the page then looks unchanged
+    no matter how many times it is fixed. One local page load is cheap; a stale
+    one costs an afternoon.
+
+    Two layouts are available and they differ in structure, not just styling, so
+    they are two documents: dashboard.html, and classic.html - the previous
+    eight-tab version, frozen. The ✦ button sets the cookie read here.
+    """
+    page = "classic.html" if request.cookies.get("bambu_page") == "classic" else "dashboard.html"
+    if not os.path.exists(os.path.join(HERE, page)):
+        page = "dashboard.html"
+    resp = send_file(os.path.join(HERE, page))
+    resp.headers["Cache-Control"] = "no-store, must-revalidate"
+    return resp
+
+
+@app.route("/api/version")
+def api_version():
+    """When the served dashboard.html was last written - so 'is my copy live?'
+    is a question with an answer."""
+    try:
+        ts = os.path.getmtime(os.path.join(HERE, "dashboard.html"))
+    except OSError:
+        ts = 0
+    return jsonify({"dashboard": ts})
 
 
 @app.route("/api/state")
@@ -2066,6 +2113,11 @@ def api_print_control():
         if param not in _SPEED_PARAMS:
             return jsonify({"ok": False, "error": "speed must be 1-4"}), 400
         cmd = {"print": {"sequence_id": "0", "command": "print_speed", "param": param}}
+    elif action in ("fan", "temp") and not CTRL_GCODE:
+        return jsonify({"ok": False, "error":
+                        "gcode commands are off - the firmware rejects them "
+                        "(HMS 0500_0500_0001_0007). Set controls.allow_gcode "
+                        "to try anyway."}), 403
     elif action == "fan":
         p = _FAN_GCODE.get(data.get("fan"))
         if not p:
@@ -2111,6 +2163,12 @@ def api_print_control():
 # Kept behind a switch rather than deleted, because it may behave differently in
 # LAN-only mode or on later firmware. Nothing raises the warning while it is off.
 AMS_ASSIGN = bool(FIL_CFG.get("allow_slot_assign", False))
+
+# Same verification gate, confirmed the hard way on an X2D: sending M140/M141
+# through `gcode_line` also raises HMS 0500_0500_0001_0007 and changes nothing.
+# The fan sliders use the same command, so they go with it. Off by default;
+# `controls.allow_gcode` re-enables the lot for testing on other firmware.
+CTRL_GCODE = bool((CFG.get("controls") or {}).get("allow_gcode", False))
 
 # Safe nozzle window per material, used when assigning a filament to a slot.
 # Only materials listed here can be assigned without explicit temperatures -

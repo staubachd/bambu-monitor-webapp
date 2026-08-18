@@ -150,6 +150,9 @@ per print must be accurate)
 - Lifetime analytics over the whole print history: total prints, **success rate**,
   total print time (+ average), filament used (kg + material €), energy (kWh +
   power €) and total cost
+- A **per-day chart** over 30 days / 90 days / a year, switchable between prints,
+  filament, print time, energy and cost. Days with nothing on them are drawn as
+  gaps rather than skipped, so a quiet fortnight looks quiet
 - A **per-month** trend (prints + cost) and the **most-printed models** (grouped by
   MakerWorld model, with count / filament / cost)
 
@@ -190,9 +193,13 @@ server-side allowlist** — never a free-form gcode passthrough)
   active (Stop behind a confirm; Pause↔Resume is one context-aware button)
 - **Speed profile:** Silent / Standard / Sport / Ludicrous
 - **Fans:** part-cooling / aux / chamber **sliders** (heat-break stays
-  firmware-managed); the live refresh won't yank a slider mid-drag
+  firmware-managed); the live refresh won't yank a slider mid-drag. Same gate as
+  the setpoints — with `controls.allow_gcode` off the readings show without
+  sliders
 - **Temperature setpoints:** heated **bed** (`M140`) and **chamber** (`M141`),
-  clamped to safe ranges (bed 0–120, chamber 0–60 °C; 0 = off)
+  clamped to safe ranges (bed 0–120, chamber 0–60 °C; 0 = off) — **off by
+  default**, rejected by current firmware, see
+  [MQTT command verification](#mqtt-command-verification)
 - **Assign a filament to an AMS slot** — built, but **off by default and it does
   not work on current firmware**. See
   [MQTT command verification](#mqtt-command-verification) below
@@ -202,18 +209,59 @@ server-side allowlist** — never a free-form gcode passthrough)
   when they're still untapped — a live map of what's available to build next
 
 **Live view** (optional)
-- The printer's built-in camera in a **Live view** tab — fully local, relayed
-  through a bundled **go2rtc** binary (no cloud, no Docker). Hidden unless a
-  camera is configured. See [Live view (camera)](#live-view-camera).
-- **Remaining time and estimated end time** sit on the tab's caption line, so the
-  camera can be watched without switching back to the overview
+- The printer's built-in camera, relayed through a bundled **go2rtc** binary
+  (fully local: no cloud, no Docker). Hidden unless a camera is configured. See
+  [Live view (camera)](#live-view-camera).
+- It has a **Live** section of its own — the thing you leave open on a second
+  screen, one click away rather than two levels down. The section only appears
+  when a camera is configured, and the stream is connected only while it is on
+  screen, never in the background
+- **Remaining time, end time and layer** sit on its caption line, so the camera
+  can be watched without switching away
 
 **UI**
-- Tabbed layout: Overview / Machine / History / Statistics / Filament /
-  Maintenance / Notes (+ Live when enabled)
-- **Responsive header** — below 1150 px the tab bar moves onto a full-width row of
-  its own and the serial/firmware line steps aside; below 560 px the last-update
-  stamp folds away too, so the chips still fit on a phone
+- **Sections, each with its own views** — the page is organised by the thing you
+  are looking at rather than by one flat row of tabs:
+
+  | Section | Views |
+  |---|---|
+  | **Printer** | Now · Hardware · Raw data |
+  | **Prints** | History · Statistics |
+  | **Filament** | Inventory · Purchases |
+  | **Workshop** | Maintenance · Notes |
+  | **Live** | the camera, when one is configured |
+
+  One `NAV` map in the page script drives the second-level bar, the routing and
+  the address bar, so a view cannot exist in one and be missing from another.
+  Every view is linkable (`#prints/history`) and the back button works. A section
+  with a single view gets no second-level bar at all.
+- **Printer · Now** puts the job, the temperatures, the AMS and both charts
+  (temperature and power) on one screen. With nothing printing it reports what
+  the machine **is** and what it printed last, instead of an empty progress ring.
+- **Printer · Hardware** holds the standing facts about the machine — identity,
+  AI monitoring, and the fans.
+- **Prints · History** is the per-day chart and the table together: **clicking a
+  bar filters the table to that day**, and clicking it again clears it.
+- **Every print expands** into one panel holding its run, its per-slot filament
+  with colours, its energy and cost breakdown, its group, its slicer profile and
+  its MakerWorld link — facts that used to be spread over five tabs and a
+  tooltip.
+- **Filament · Purchases** keeps the invoice importer folded away behind a
+  button: the list is what you come to read, the importer is what you
+  occasionally come to use.
+- **Two layouts**, swapped with the ✦ button. They differ in structure, not just
+  styling, so they are two documents rather than one document with a CSS layer:
+  - `dashboard.html` — the four sections above.
+  - `classic.html` — the previous eight-tab page, **frozen**. It is the way back,
+    not a second thing to maintain; fixes land in `dashboard.html`.
+
+  The button sets a `bambu_page` cookie and reloads; `/` reads that cookie and
+  serves whichever was chosen last, so the choice survives a restart and needs no
+  server-side state. `scratchpad/bm/t_layout.js` checks that both documents exist,
+  reach each other, and that no card was lost in the move.
+- **Responsive header** — below 1150 px the section bar moves onto a full-width
+  row of its own and the serial/firmware line steps aside; below 560 px the
+  last-update stamp folds away too, so the chips still fit on a phone
 - Live updates via Server-Sent Events (no polling from the browser)
 - **German by default with a DE/EN switcher**
 - Light/dark theme toggle
@@ -594,7 +642,7 @@ printer (and re-enable LAN Mode Live View, which a reboot can revert).
 | `POST /api/led`            | Chamber light `{ "mode": "on"｜"off" }` (needs a live connection).   |
 | `POST /api/ams/filament`   | Tell the printer what is loaded in a slot `{ "slot": 1, "fkey": … }`. **Disabled by default** (`filament.allow_slot_assign`) — current firmware rejects it, see [MQTT command verification](#mqtt-command-verification). |
 | `POST /api/print/control`  | Print controls `{ "action": "pause｜resume｜stop｜speed｜fan｜temp", … }` — strict allowlist (speed 1–4, fan `cooling｜aux1｜aux2` %, temp `bed｜chamber` °C). Needs a live connection. |
-| `GET /api/stats`           | Lifetime analytics from the prints table (totals, success rate, per-month, top models). |
+| `GET /api/stats`           | Lifetime analytics from the prints table (totals, success rate, per-day, per-month, top models). |
 | `GET /api/notes`           | All notes, newest-touched first.                                    |
 | `POST /api/notes`          | Create a note, or update one when an `id` is included.              |
 | `POST /api/notes/delete`   | Delete a note `{ "id": … }`, and its pictures with it.              |
@@ -847,13 +895,22 @@ A few behaviours are non-obvious because the printer's raw data is messy:
   the local MQTT request topic: commands the printer does not consider to come
   from a trusted client are rejected with HMS **0500_0500_0001_0007**, *"MQTT
   Command verification failed, please update Studio or Handy"*. Confirmed on an
-  X2D — assigning a filament to an AMS slot raised that warning and changed
-  nothing. The simple controls this app has always used (`pause`/`resume`/`stop`,
-  `print_speed`, `gcode_line`, `ledctrl`) are **not** gated and keep working.
-  The feature is therefore behind `filament.allow_slot_assign` (default
-  **false**), which also hides the button; nothing sends the command while it is
-  off. Kept rather than deleted in case LAN-only mode or later firmware behaves
-  differently.
+  X2D, twice: assigning a filament to an AMS slot, and setting the bed or chamber
+  temperature. Both raised the warning and changed nothing.
+
+  Two command families are therefore **off by default**, each behind a switch,
+  and the UI hides what it cannot use:
+
+  | Config | Covers | Default |
+  | --- | --- | --- |
+  | `filament.allow_slot_assign` | `ams_filament_setting` — the Assign button | `false` |
+  | `controls.allow_gcode` | `gcode_line` — bed/chamber setpoints (`M140`/`M141`) and the fan sliders (`M106`) | `false` |
+
+  With gcode off the fans still show their readings, just without sliders, and
+  the temperature **set** buttons are hidden. `pause`/`resume`/`stop`,
+  `print_speed` and `ledctrl` are **believed** to be ungated — they use different
+  commands and have not raised the warning — but that is now an observation, not
+  a guarantee. I previously asserted `gcode_line` was ungated and it was not.
 
 - **A print group is a name, not a table.** `prints.pgroup` holds the group's
   name directly: no ids to keep in step, renaming is "write the new name on the
@@ -905,6 +962,7 @@ A few behaviours are non-obvious because the printer's raw data is messy:
 | MQTT keeps connecting/disconnecting                 | Two app instances fighting over the printer's single `bblp` login — ensure the watchdog didn't spawn a duplicate (`start.sh` guards against this). |
 | `#1054 Unknown column …` (MariaDB)                  | Backend is on MariaDB but the schema is behind; the column-migration runs on startup — restart the app, or check the config didn't get flipped to sqlite. |
 | Garbled `°`/`€`/umlauts after editing on Windows    | A file was round-tripped through PowerShell; re-edit with a UTF-8-aware tool. |
+| A dashboard change doesn't appear after copying it over | The page is served `no-store`, so this should not happen — but to be sure, hover the SN line in the header or check the console: both report when the served `dashboard.html` was last written. `GET /api/version` returns the same timestamp. |
 | Cloud login fails                                   | Re-run `tools/setup_cloud.py` to refresh the stored token.                  |
 | A print is stuck on **"running"** with a runaway duration | The app was down when it finished, so no end time was recorded. Press **Refresh** — cloud enrichment closes it if the job is still among the last 20 cloud tasks and reports `status == 2`. Otherwise click its **Duration** cell and type how long it took (`5h 20m`). `tools/dump_cloud_tasks.py` shows which condition failed. |
 | A spool shows a **code** (`A00-N04`) instead of a colour name | That code isn't in the built-in table. Add `"A00-N04": "Cocoa Brown"` under `filament.color_names` and restart. |
@@ -923,8 +981,8 @@ A few behaviours are non-obvious because the printer's raw data is messy:
 | Live view tab missing                               | `camera.enabled` is false, or `/api/camera` reports disabled. Set it in `printer.config.json` and restart. |
 | Print controls do nothing / "printer not connected" | Recording mode is **Off**, which drops the MQTT stream — controls need a live connection. Switch to Auto/On. |
 | A fan slider moves the **wrong** fan                | The `M106` fan mapping (`P1/P2/P3`) can differ per model. Adjust `_FAN_GCODE` in `app.py`. |
-| **HMS 0500_0500_0001_0007** after assigning a slot  | *"MQTT Command verification failed"* — the firmware rejected the command; nothing was written and nothing is damaged. Acknowledge the warning in the header. Slot assignment ships **off** for this reason; see [MQTT command verification](#mqtt-command-verification). |
-| **Chamber** setpoint has no effect                  | The X2D firmware may not honour `M141` over `gcode_line`. Verify by setting e.g. 40 °C and watching `chamber.target` in the Raw data view; the bed (`M140`) works regardless. |
+| **HMS 0500_0500_0001_0007** after a control      | *"MQTT Command verification failed"* — the firmware rejected the command; nothing was written and nothing is damaged. Acknowledge the warning in the header. Slot assignment and the gcode-based controls (bed/chamber setpoints, fan sliders) ship **off** for this reason; see [MQTT command verification](#mqtt-command-verification). |
+| Bed/chamber **set** buttons and fan sliders are missing | Expected — `controls.allow_gcode` is `false` because the firmware rejects `gcode_line`. Set it to `true` to try on other firmware; the readings show either way. |
 
 ---
 

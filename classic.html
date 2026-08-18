@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bambu X2D Monitor</title>
+<title>Bambu X2D Monitor · classic</title>
 <!-- inline SVG favicon: white printer glyph on the brand's indigo gradient (no external asset) -->
 <link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4MT0iMCIgeTE9IjAiIHgyPSIxIiB5Mj0iMSI+PHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjNjM2NmYxIi8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjODE4Y2Y4Ii8+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iOCIgZmlsbD0idXJsKCNnKSIvPjxyZWN0IHg9IjEwLjUiIHk9IjUuNSIgd2lkdGg9IjExIiBoZWlnaHQ9IjYuNSIgcng9IjEuNSIgZmlsbD0iI2ZmZiIvPjxyZWN0IHg9IjYiIHk9IjExIiB3aWR0aD0iMjAiIGhlaWdodD0iOC41IiByeD0iMi41IiBmaWxsPSIjZmZmIi8+PGNpcmNsZSBjeD0iMjEuNSIgY3k9IjE1IiByPSIxLjUiIGZpbGw9IiM2MzY2ZjEiLz48cmVjdCB4PSI5LjUiIHk9IjE3IiB3aWR0aD0iMTMiIGhlaWdodD0iOSIgcng9IjEuNSIgZmlsbD0iI2ZmZiIvPjxyZWN0IHg9IjEyIiB5PSIyMC40IiB3aWR0aD0iOCIgaGVpZ2h0PSIxLjUiIHJ4PSIuNzUiIGZpbGw9IiM4MThjZjgiLz48cmVjdCB4PSIxMiIgeT0iMjMiIHdpZHRoPSI1LjUiIGhlaWdodD0iMS41IiByeD0iLjc1IiBmaWxsPSIjODE4Y2Y4Ii8+PC9zdmc+">
 <style>
@@ -75,12 +75,56 @@
   html:root body::before{background:none}
   html:root body{font-size:15.5px; line-height:1.55}
 
-  /* --- layout --- */
-  :root:root .wrap{max-width:1700px; padding:16px 24px 46px}
-  :root:root header{margin-bottom:0; gap:10px 16px}
+  /* --- layout: sidebar + content, instead of a top bar over everything --- */
+  :root:root .wrap{
+    display:grid; grid-template-columns:218px minmax(0,1fr); gap:24px;
+    align-items:start; max-width:1900px; padding:18px 24px 40px}
+  :root:root header{
+    grid-column:1; flex-direction:column; align-items:stretch; gap:12px; margin:0;
+    position:sticky; top:18px; align-self:start;
+    padding:16px 14px; border:1px solid var(--border); border-radius:14px;
+    background:var(--surface)}
+  :root:root .hgap{display:none}
+  :root:root .brand{gap:11px; padding:0 4px 4px}
   :root:root .brand h1{font-size:17px}
-  :root:root .pill, :root:root .hbtn{box-shadow:none}
-  :root:root .icon-btn{border-radius:9px; box-shadow:none}
+  :root:root .tabs{
+    flex-direction:column; width:100%; margin:0; padding:0; gap:2px;
+    background:none; border:0}
+  :root:root .tabs button{
+    width:100%; text-align:left; border:0; background:none; box-shadow:none;
+    border-radius:8px; padding:9px 12px; font-size:13.5px; font-weight:600;
+    letter-spacing:0}
+  :root:root .tabs button:hover{background:var(--surface-2); color:var(--text)}
+  :root:root .tabs button.on{
+    background:var(--accent-soft); color:var(--accent);
+    box-shadow:inset 2px 0 0 var(--accent)}
+  /* the header chips become stacked status rows */
+  :root:root .pill,
+  :root:root .recwrap,
+  :root:root .hbtn{
+    width:100%; justify-content:flex-start; border-radius:9px; box-shadow:none}
+  :root:root .hwrap{width:100%}
+  :root:root .hdr-actions{display:flex; gap:8px; width:100%}
+  /* The health panel is anchored right:0, which opens it leftward - correct when
+     its button sits at the right of a wide top bar, off screen when the button
+     is in a 218px sidebar. In this layout it opens rightward instead. */
+  :root:root .hpanel{right:auto; left:0}
+  :root:root .icon-btn{
+    border-radius:9px; box-shadow:none; flex:1; width:auto; min-width:0}
+  @media(max-width:1000px){
+    :root:root .wrap{grid-template-columns:minmax(0,1fr)}
+    :root:root header{
+      position:static; flex-direction:row; flex-wrap:wrap; align-items:center}
+    :root:root .tabs{flex-direction:row; flex-wrap:wrap; width:auto}
+    :root:root .tabs button{width:auto}
+    :root:root .pill,
+    :root:root .recwrap,
+    :root:root .hbtn,
+    :root:root .hwrap{width:auto}
+    :root:root .hdr-actions{display:contents}
+    /* back to a top bar, so back to opening leftward */
+    :root:root .hpanel{right:0; left:auto}
+  }
 
   /* --- panels: flat, bordered, generous inside --- */
   :root:root .card{
@@ -175,92 +219,8 @@
     box-shadow:var(--shadow)}
   /* Two classes, so these beat the single-class `.dash{display:grid}` rule
      below regardless of declaration order. */
-  .dash.view{display:none}
-  .dash.view.on{display:grid}
-
-  /* ---------- navigation ----------
-     Two levels, deliberately unalike so they can't be read as one: the four
-     sections are a segmented control in the masthead, the views inside the
-     current section are underlined text on a rule below it. */
-  .sections{display:flex; gap:2px; flex-wrap:wrap; margin-left:24px;
-    padding:4px; background:var(--surface-2);
-    border:1px solid var(--border); border-radius:12px}
-  .sections button{font:inherit; font-size:13.5px; font-weight:650; color:var(--text-2);
-    background:none; border:0; border-radius:9px; padding:8px 16px;
-    cursor:pointer; transition:.15s; white-space:nowrap}
-  .sections button:hover{color:var(--text); background:var(--surface)}
-  .sections button.on{color:#fff; background:var(--accent)}
-  .subnav{display:flex; align-items:center; gap:2px; flex-wrap:wrap;
-    margin:18px 0 20px; border-bottom:1px solid var(--border)}
-  .subnav button{font:inherit; font-size:13px; font-weight:600; color:var(--text-3);
-    background:none; border:0; border-bottom:2px solid transparent;
-    padding:9px 14px; margin-bottom:-1px; cursor:pointer; transition:.15s;
-    white-space:nowrap}
-  .subnav button:hover{color:var(--text)}
-  .subnav button.on{color:var(--accent); border-bottom-color:var(--accent)}
-  .subnav .sub-note{margin-left:auto; padding-right:2px;
-    font-size:12px; color:var(--text-3); font-variant-numeric:tabular-nums}
-  @media(max-width:1150px){
-    .sections{margin-left:0; order:10; width:100%; justify-content:center}
-  }
-
-  /* a single-view section has no second-level bar, and no rule under the
-     masthead either - the rule belongs to the bar, not to the page */
-  .subnav.empty{border-bottom:0; margin:8px 0 0}
-
-  /* ---------- printer · now ----------
-     idle: an empty progress ring says nothing, so the panel says what the
-     printer is instead, and what it did last */
-  .idle{display:flex; flex-direction:column; gap:4px; padding:6px 0}
-  .idle-h{font-size:23px; font-weight:650; letter-spacing:-.02em}
-  .idle-sub{font-size:13px; color:var(--text-3)}
-  .idle-last{display:flex; gap:26px; flex-wrap:wrap; margin-top:16px;
-    padding-top:15px; border-top:1px solid var(--border)}
-  .idle-last .meta-val{font-size:15px}
-
-  /* ---------- prints · history ----------
-     A bar in the day chart and the rows behind it are the same fact at two
-     zoom levels; clicking one filters to the other. */
-  .dbar.picked{stroke:var(--accent); stroke-width:2}
-  .day-filter{display:none; align-items:center; gap:10px; flex-wrap:wrap;
-    margin-bottom:12px; padding:9px 13px; border-radius:11px;
-    background:var(--accent-soft); border:1px solid var(--accent);
-    font-size:12.5px; font-weight:600}
-  .day-filter.on{display:flex}
-  /* the expanded print: everything about one job in one place, instead of the
-     five tabs its facts used to be spread over */
-  .htab .exp{width:1%; padding-right:0}
-  .exp-btn{border:0; background:none; cursor:pointer; color:var(--text-3);
-    font:inherit; font-size:11px; line-height:1; padding:5px 6px; border-radius:6px;
-    transition:transform .15s ease, color .15s ease; display:block}
-  .exp-btn:hover{color:var(--accent)}
-  .exp-btn.open{transform:rotate(90deg); color:var(--accent)}
-  .htab tr.detail td{padding:0; border-top:0}
-  .htab tr.detail:hover td{background:none}
-  .det{display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr));
-    gap:18px 26px; padding:14px 16px 16px; margin:0 0 8px;
-    border-radius:12px; background:var(--surface-2); border:1px solid var(--border)}
-  .det h4{margin:0 0 8px; font-size:12.5px; font-weight:650; color:var(--text-3)}
-  .det .dl{display:grid; grid-template-columns:auto 1fr; gap:4px 14px;
-    font-size:12.5px; align-items:baseline}
-  .det .dl .k{color:var(--text-3); white-space:nowrap}
-  .det .dl .v{font-variant-numeric:tabular-nums; text-align:right;
-    font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
-  .det .slot{display:flex; align-items:center; gap:9px; padding:5px 0;
-    border-top:1px solid var(--border); font-size:12.5px}
-  .det .slot:first-of-type{border-top:0}
-  .det .slot .sw{flex:none; width:13px; height:13px; border-radius:4px;
-    background:var(--sw,#888); box-shadow:inset 0 0 0 1px rgba(127,127,127,.45)}
-  .det .slot .sg{margin-left:auto; font-variant-numeric:tabular-nums;
-    font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
-  .det .none{font-size:12.5px; color:var(--text-3)}
-
-  /* ---------- filament · purchases ----------
-     The importer is what you occasionally come here to use, not what you come
-     here to read, so it stays folded away until asked for. */
-  .imp-toggle{margin-top:18px}
-  #buyImport{display:none}
-  #buyImport.on{display:block}
+  .dash.tab-panel{display:none}
+  .dash.tab-panel.on{display:grid}
   #liveWrap{position:relative; width:100%; aspect-ratio:16/9; max-height:66vh;
     background:#000; border-radius:12px; overflow:hidden; margin:0 auto}
   #liveFrame{position:absolute; inset:0; width:100%; height:100%; border:0; background:#000}
@@ -301,8 +261,8 @@
   /* every tile stretches to its row's height, so each row reads as an even band:
      row 1 (printing · filament · temps) and row 2 (temperature · power · cost)
      each come out level instead of the shorter tiles looking undersized. */
-  #v-printer-now{align-items:stretch}
-  #v-printer-now .temps-2x2{grid-template-rows:1fr 1fr}
+  #tab-overview{align-items:stretch}
+  #tab-overview .temps-2x2{grid-template-rows:1fr 1fr}
   @media(max-width:1450px){
     .span-3{grid-column:span 6} .span-4{grid-column:span 6} .span-8{grid-column:span 12}
     .span-6{grid-column:span 12}
@@ -913,13 +873,15 @@
         <div class="sub" id="serial">—</div>
       </div>
     </div>
-    <nav class="sections" id="sections">
-      <button data-sec="printer"  data-i18n="Printer">Printer</button>
-      <button data-sec="prints"   data-i18n="Prints">Prints</button>
-      <button data-sec="filament" data-i18n="Filament">Filament</button>
-      <button data-sec="workshop" data-i18n="Workshop">Workshop</button>
-      <!-- revealed once /api/camera reports one is configured -->
-      <button data-sec="live" id="liveSec" data-i18n="Live" style="display:none">Live</button>
+    <nav class="tabs" id="tabs">
+      <button data-tab="overview" class="on" data-i18n="Overview">Overview</button>
+      <button data-tab="machine" data-i18n="Machine">Machine</button>
+      <button data-tab="history" data-i18n="History">History</button>
+      <button data-tab="stats" data-i18n="Statistics">Statistics</button>
+      <button data-tab="filament" data-i18n="Filament">Filament</button>
+      <button data-tab="maintenance" data-i18n="Maintenance">Maintenance</button>
+      <button data-tab="notes" data-i18n="Notes">Notes</button>
+      <button data-tab="live" id="liveTabBtn" data-i18n="Live" style="display:none">Live</button>
     </nav>
     <div class="hgap"></div>
     <span class="pill"><span class="dot" id="conn"></span><span id="connText">connecting…</span><span class="upd" id="lastUpd"></span></span>
@@ -955,28 +917,17 @@
       <button class="icon-btn" id="ledBtn" title="Chamber light" disabled>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"/></svg>
       </button>
-      <button class="icon-btn" id="designBtn" title="Switch design">✦</button>
+      <button class="icon-btn" id="designBtn" title="Switch layout">✦</button>
       <button class="icon-btn" id="themeBtn" title="Toggle theme">◐</button>
     </div>
   </header>
 
-  <!-- second level: which view of the current section is on screen. Built by
-       the router from NAV, so the markup cannot fall out of step with it. -->
-  <nav class="subnav" id="subnav"></nav>
+  <!-- ============ TAB 1: overview ============ -->
+  <div class="dash tab-panel on" id="tab-overview">
 
-  <!-- ============ PRINTER · Now ============
-       The job and the camera side by side: the camera used to be a tab of its
-       own, which is why remaining time had to be repeated into its caption. -->
-  <div class="dash view on" id="v-printer-now">
+  <!-- row 1: hero | AMS | temp tiles (top right)   ·   row 2: temperature | power draw (half each, equal height)   ·   cost at bottom -->
     <section class="card hero span-4">
-      <!-- nothing is printing: an empty ring at 0% is not information, so the
-           panel reports what the printer is and what it last did instead -->
-      <div class="idle" id="idleWrap" style="display:none">
-        <div class="idle-h" id="idleState">—</div>
-        <div class="idle-sub" id="idleSub"></div>
-        <div class="idle-last" id="idleLast"></div>
-      </div>
-      <div class="ring-wrap" id="ringWrap">
+      <div class="ring-wrap">
         <svg class="ring" viewBox="0 0 150 150">
           <circle class="ring-track" cx="75" cy="75" r="64"/>
           <circle class="ring-prog" id="ringProg" cx="75" cy="75" r="64"
@@ -989,7 +940,7 @@
           </div>
         </div>
       </div>
-      <div class="hero-info" id="heroInfo">
+      <div class="hero-info">
         <span class="statepill" id="statePill">—</span>
         <div class="job-name" id="jobName">No active job</div>
         <a class="mw-link" id="mwLink" target="_blank" rel="noopener noreferrer" style="display:none"><span data-i18n="View on MakerWorld">View on MakerWorld</span> ↗</a>
@@ -1017,6 +968,14 @@
       </div>
     </section>
 
+
+  <!-- AMS (top middle) -->
+  <section class="card ams span-4" id="amsCard">
+    <div class="card-head"><h3>Filament · AMS</h3><span class="meta" id="amsMeta"></span></div>
+    <div class="spools" id="spools"></div>
+  </section>
+
+  <!-- temperatures (top right, 2x2) -->
   <section class="span-4 temps-2x2 compact">
     <!-- 2x2 order: Nozzle 1 | Nozzle 2  /  Bed | Chamber -->
     <div class="card temp">
@@ -1046,10 +1005,8 @@
       <div class="temp-sub" data-i18n="heated chamber">heated chamber</div>
     </div>
   </section>
-  <section class="card ams span-4" id="amsCard">
-    <div class="card-head"><h3>Filament · AMS</h3><span class="meta" id="amsMeta"></span></div>
-    <div class="spools" id="spools"></div>
-  </section>
+
+  <!-- temperature history (half width) -->
   <section class="card span-6">
     <div class="chart-head">
       <h3 style="margin:0;font-size:12px;font-weight:650;letter-spacing:.08em;text-transform:uppercase;color:var(--text-3)" data-i18n="Temperatures">Temperatures</h3>
@@ -1072,6 +1029,8 @@
     </div>
     <div class="temp-sub" id="chartEmpty" style="display:none">Collecting data…</div>
   </section>
+
+  <!-- power draw (smart plug, half width) -->
   <section class="card span-6" id="powerCard" style="display:none">
     <div class="card-head"><h3 data-i18n="Power draw">Power draw</h3><span class="meta" id="powerMeta"></span>
       <div class="ranges" id="pranges" style="margin-left:auto">
@@ -1092,13 +1051,27 @@
       <div class="tip" id="ptip"></div>
     </div>
   </section>
-  </div>
 
-  <!-- ============ PRINTER · Hardware ============
-       The standing facts about the machine, and the fans that move air through
-       it - everything you look at when the question is the printer rather than
-       the print. -->
-  <div class="dash view" id="v-printer-machine">
+  <!-- cost (bottom) -->
+  <section class="card span-6" id="costCard" style="display:none">
+    <div class="card-head"><h3 data-i18n="Cost">Cost</h3><span class="meta" id="costMeta"></span></div>
+    <div class="cost-grid">
+      <div class="cost-col">
+        <div class="cost-col-h"><span class="ci" style="background:var(--s-power)"></span><span data-i18n="Power">Power</span></div>
+        <div id="pwRows"></div>
+      </div>
+      <div class="cost-col">
+        <div class="cost-col-h"><span class="ci" style="background:var(--accent)"></span><span data-i18n="Material">Material</span></div>
+        <div id="matRows"></div>
+      </div>
+    </div>
+    <div class="cost-last" id="costLast"></div>
+  </section>
+
+  </div><!-- /tab-overview -->
+
+  <!-- ============ TAB 2: machine ============ -->
+  <div class="dash tab-panel" id="tab-machine">
     <section class="card span-4">
       <div class="card-head"><h3 data-i18n="Fans &amp; airflow">Fans &amp; airflow</h3></div>
       <div class="rows" id="fanRows"></div>
@@ -1111,10 +1084,6 @@
       <div class="card-head"><h3 data-i18n="AI monitoring">AI monitoring</h3><span class="meta" id="aiSens"></span></div>
       <div class="chips" style="margin-top:0" id="aiChips"></div>
     </section>
-  </div>
-
-  <!-- ============ PRINTER · Raw data ============ -->
-  <div class="dash view" id="v-printer-raw">
     <section class="card span-12">
       <div class="card-head" style="margin-bottom:0">
         <h3 data-i18n="Raw printer data">Raw printer data</h3>
@@ -1127,36 +1096,39 @@
       </div>
       <pre id="rawBox" style="display:none"></pre>
     </section>
-  </div>
+  </div><!-- /tab-machine -->
 
-  <!-- ============ PRINTS · History ============
-       The per-day chart and the table are one page: clicking a bar filters the
-       table to that day, which is what the two of them were always for. -->
-  <!-- ============ LIVE ============
-       Its own section, as it was before the restructure: the camera is what
-       you leave open on a second screen, not something to reach through two
-       levels of navigation. Hidden entirely unless one is configured. -->
-  <div class="dash view" id="v-live-camera">
+  <!-- ============ TAB 3: print history ============ -->
+  <div class="dash tab-panel" id="tab-history">
     <section class="card span-12">
-      <div class="card-head" id="liveHead">
-        <h3 data-i18n="Live view">Live view</h3>
-        <span class="meta" data-i18n="printer camera">printer camera</span>
-        <!-- repeated from the overview hero so the camera can be watched without
-             switching tabs to see how far along the print is -->
-        <div class="head-stats">
-          <span class="hs"><span class="hs-label" data-i18n="Layer">Layer</span><span class="hs-val" id="liveLayers">—</span></span>
-          <span class="hs"><span class="hs-label" data-i18n="Remaining">Remaining</span><span class="hs-val" id="liveEta">—</span></span>
-          <span class="hs"><span class="hs-label" data-i18n="Ends">Ends</span><span class="hs-val" id="liveEnd">—</span></span>
-        </div>
+      <div class="card-head" id="histHead">
+        <h3 data-i18n="Print history">Print history</h3><span class="meta" id="histMeta"></span>
+        <span class="seg" id="histViewSeg" style="margin-left:auto">
+          <button data-v="timeline" data-i18n="Timeline">Timeline</button>
+          <button data-v="groupsfirst" data-i18n="Groups first">Groups first</button>
+          <button data-v="groupsonly" data-i18n="Only groups">Only groups</button>
+          <button data-v="singlesonly" data-i18n="Only singles">Only singles</button>
+        </span>
+        <button class="wbtn" id="histBtn" data-i18n="Refresh">Refresh</button>
       </div>
-      <div id="liveWrap">
-        <iframe id="liveFrame" title="Live view" allow="autoplay; fullscreen"
-                allowfullscreen frameborder="0"></iframe>
+      <div class="selbar" id="histSelBar">
+        <span id="histSelCount"></span>
+        <button class="wbtn" id="histGroupBtn" data-i18n="Group…">Group…</button>
+        <button class="wbtn" id="histUngroupBtn" data-i18n="Ungroup">Ungroup</button>
+        <button class="wbtn" id="histSelClear" data-i18n="Clear selection">Clear selection</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="htab" id="histTable"><tbody></tbody></table>
       </div>
     </section>
-  </div>
+  </div><!-- /tab-history -->
 
-  <div class="dash view" id="v-prints-history">
+  <!-- ============ TAB: statistics ============ -->
+  <div class="dash tab-panel" id="tab-stats">
+    <section class="card span-12">
+      <div class="card-head"><h3 data-i18n="Statistics">Statistics</h3><span class="meta" data-i18n="all recorded prints">all recorded prints</span></div>
+      <div class="kpis" id="statKpis"></div>
+    </section>
     <section class="card span-12">
       <div class="card-head" id="dayHead">
         <h3 data-i18n="Per day">Per day</h3><span class="meta" id="dayMeta"></span>
@@ -1181,54 +1153,7 @@
         <div class="tip" id="dtip"></div>
       </div>
     </section>
-    <section class="card span-12">
-      <div class="card-head" id="histHead">
-        <h3 data-i18n="Print history">Print history</h3><span class="meta" id="histMeta"></span>
-        <span class="seg" id="histViewSeg" style="margin-left:auto">
-          <button data-v="timeline" data-i18n="Timeline">Timeline</button>
-          <button data-v="groupsfirst" data-i18n="Groups first">Groups first</button>
-          <button data-v="groupsonly" data-i18n="Only groups">Only groups</button>
-          <button data-v="singlesonly" data-i18n="Only singles">Only singles</button>
-        </span>
-        <button class="wbtn" id="histBtn" data-i18n="Refresh">Refresh</button>
-      </div>
-      <!-- set by clicking a bar in the chart above -->
-      <div class="day-filter" id="dayFilterBar">
-        <span id="dayFilterTxt"></span>
-        <button class="wbtn" id="dayFilterClear" data-i18n="Show all prints">Show all prints</button>
-      </div>
-      <div class="selbar" id="histSelBar"
-        <span id="histSelCount"></span>
-        <button class="wbtn" id="histGroupBtn" data-i18n="Group…">Group…</button>
-        <button class="wbtn" id="histUngroupBtn" data-i18n="Ungroup">Ungroup</button>
-        <button class="wbtn" id="histSelClear" data-i18n="Clear selection">Clear selection</button>
-      </div>
-      <div style="overflow-x:auto">
-        <table class="htab" id="histTable"><tbody></tbody></table>
-      </div>
-    </section>
-  </div>
 
-  <!-- ============ PRINTS · Statistics ============ -->
-  <div class="dash view" id="v-prints-statistics">
-    <section class="card span-12">
-      <div class="card-head"><h3 data-i18n="Statistics">Statistics</h3><span class="meta" data-i18n="all recorded prints">all recorded prints</span></div>
-      <div class="kpis" id="statKpis"></div>
-    </section>
-  <section class="card span-6" id="costCard" style="display:none">
-    <div class="card-head"><h3 data-i18n="Cost">Cost</h3><span class="meta" id="costMeta"></span></div>
-    <div class="cost-grid">
-      <div class="cost-col">
-        <div class="cost-col-h"><span class="ci" style="background:var(--s-power)"></span><span data-i18n="Power">Power</span></div>
-        <div id="pwRows"></div>
-      </div>
-      <div class="cost-col">
-        <div class="cost-col-h"><span class="ci" style="background:var(--accent)"></span><span data-i18n="Material">Material</span></div>
-        <div id="matRows"></div>
-      </div>
-    </div>
-    <div class="cost-last" id="costLast"></div>
-  </section>
     <section class="card span-6">
       <div class="card-head"><h3 data-i18n="Prints per month">Prints per month</h3></div>
       <div class="mbars" id="statMonths"></div>
@@ -1237,10 +1162,10 @@
       <div class="card-head"><h3 data-i18n="Top models">Top models</h3></div>
       <div class="tmodels" id="statModels"></div>
     </section>
-  </div>
+  </div><!-- /tab-stats -->
 
-  <!-- ============ FILAMENT · Inventory ============ -->
-  <div class="dash view" id="v-filament-inventory">
+  <!-- ============ TAB: filament ============ -->
+  <div class="dash tab-panel" id="tab-filament">
     <section class="card span-12">
       <div class="card-head">
         <h3 data-i18n="Filament">Filament</h3>
@@ -1266,10 +1191,7 @@
       </div>
       <div class="mnt-note" data-i18n="Usage is summed from the per-slot detail of every recorded print. Names come from the AMS RFID tag, so spools used before this page existed show their material and colour only.">Usage is summed from the per-slot detail of every recorded print. Names come from the AMS RFID tag, so spools used before this page existed show their material and colour only.</div>
     </section>
-  </div>
 
-  <!-- ============ FILAMENT · Purchases ============ -->
-  <div class="dash view" id="v-filament-purchases">
     <section class="card span-12">
       <div class="card-head" id="buyHead">
         <h3 data-i18n="Purchases">Purchases</h3><span class="meta" id="buyMeta"></span>
@@ -1287,12 +1209,7 @@
       </div>
       <!-- import sits BELOW the list: the history is what you come here to read,
            the importer is what you occasionally come here to use -->
-      <!-- the list is what you come here to read; the importer is what you
-           occasionally come here to use, so it stays folded away -->
-      <div class="sub-sec imp-toggle">
-        <button class="wbtn" id="buyImportBtn" data-i18n="+ Add an order">+ Add an order</button>
-      </div>
-      <div class="sub-sec" id="buyImport">
+      <div class="sub-sec">
         <div class="sub-head" data-i18n="Add an order">Add an order</div>
         <label class="dropzone" id="buyDrop">
           <input type="file" id="buyFile" accept="application/pdf,.pdf,.txt" hidden>
@@ -1310,10 +1227,10 @@
         <div class="mnt-note" data-i18n="Nothing is saved until you press Save. Reading an order is best-effort — check every line, especially price and quantity.">Nothing is saved until you press Save. Reading an order is best-effort — check every line, especially price and quantity.</div>
       </div>
     </section>
-  </div>
+  </div><!-- /tab-filament -->
 
-  <!-- ============ WORKSHOP · Maintenance ============ -->
-  <div class="dash view" id="v-workshop-maintenance">
+  <!-- ============ TAB: maintenance ============ -->
+  <div class="dash tab-panel" id="tab-maintenance">
     <section class="card span-12" id="maintCard">
       <div class="card-head">
         <h3 data-i18n="Maintenance">Maintenance</h3><span class="meta" id="maintMeta"></span>
@@ -1322,10 +1239,10 @@
       <div class="mnt" id="maintRows"></div>
       <div class="mnt-note" data-i18n="Bambu's X2D intervals are calendar-based (X/Y ~2 months, Z ~4 months); shown here as print-hours for ~3 h/day. Click an interval to adjust to your usage.">Bambu's X2D intervals are calendar-based (X/Y ~2 months, Z ~4 months); shown here as print-hours for ~3 h/day. Click an interval to adjust to your usage.</div>
     </section>
-  </div>
+  </div><!-- /tab-maintenance -->
 
-  <!-- ============ WORKSHOP · Notes ============ -->
-  <div class="dash view" id="v-workshop-notes">
+  <!-- ============ TAB: notes ============ -->
+  <div class="dash tab-panel" id="tab-notes">
     <section class="card span-12">
       <div class="card-head">
         <h3 data-i18n="Notes">Notes</h3><span class="meta" id="noteMeta"></span>
@@ -1352,7 +1269,27 @@
       <div class="note-cats" id="noteCats"></div>
       <div class="notes" id="noteList"></div>
     </section>
-  </div>
+  </div><!-- /tab-notes -->
+
+  <div class="dash tab-panel" id="tab-live">
+    <section class="card span-12">
+      <div class="card-head" id="liveHead">
+        <h3 data-i18n="Live view">Live view</h3>
+        <span class="meta" data-i18n="printer camera">printer camera</span>
+        <!-- repeated from the overview hero so the camera can be watched without
+             switching tabs to see how far along the print is -->
+        <div class="head-stats">
+          <span class="hs"><span class="hs-label" data-i18n="Layer">Layer</span><span class="hs-val" id="liveLayers">—</span></span>
+          <span class="hs"><span class="hs-label" data-i18n="Remaining">Remaining</span><span class="hs-val" id="liveEta">—</span></span>
+          <span class="hs"><span class="hs-label" data-i18n="Ends">Ends</span><span class="hs-val" id="liveEnd">—</span></span>
+        </div>
+      </div>
+      <div id="liveWrap">
+        <iframe id="liveFrame" title="Live view" allow="autoplay; fullscreen"
+                allowfullscreen frameborder="0"></iframe>
+      </div>
+    </section>
+  </div><!-- /tab-live -->
 
 </div>
 
@@ -1642,23 +1579,6 @@ const DE = {
   "nothing in this window":"nichts in diesem Zeitraum",
   "nothing printed":"nichts gedruckt",
   "Console design":"Console-Design", "Blueprint design":"Blueprint-Design",
-  // navigation: four sections and the views inside them
-  "Printer":"Drucker", "Prints":"Drucke", "Workshop":"Werkstatt",
-  "Hardware":"Hardware", "Raw data":"Rohdaten", "Inventory":"Bestand",
-  "Switch layout":"Layout wechseln",
-  // Now, when nothing is printing
-  "Ready":"Bereit", "printer offline":"Drucker offline", "spools loaded":"Spulen geladen",
-  "nozzle":"Düse", "Last print":"Letzter Druck", "Finished":"Fertig", "Took":"Dauer",
-  // the expanded print
-  "show everything about this print":"alles zu diesem Druck anzeigen",
-  "Run":"Ablauf", "Started":"Start", "Ended":"Ende", "Duration":"Dauer",
-  "Error":"Fehler", "Slot":"Slot", "Filing":"Ablage", "Group":"Gruppe",
-  "Slicer profile":"Slicer-Profil", "Energy":"Energie", "Material":"Material",
-  "no per-slot detail recorded":"keine Slot-Details aufgezeichnet",
-  "nothing recorded":"nichts aufgezeichnet",
-  // chart -> table drill-down
-  "Showing":"Zeige", "Show all prints":"Alle Drucke zeigen",
-  "+ Add an order":"+ Bestellung hinzufügen", "− Hide the importer":"− Import ausblenden",
   "Timeline":"Zeitachse", "Groups first":"Gruppen zuerst",
   "Only groups":"Nur Gruppen", "Only singles":"Nur Einzelne",
   "Single prints":"Einzelne Drucke",
@@ -1757,7 +1677,7 @@ $("themeBtn").addEventListener("click", ()=>{
    styling, so they are two documents rather than one document with a CSS layer:
    this page, and classic.html - the previous eight-tab version, kept frozen. The
    server reads the cookie and serves whichever was chosen last. */
-const OTHER_PAGE = "classic";
+const OTHER_PAGE = "";   // empty: back to the default page
 $("designBtn").addEventListener("click", ()=>{
   document.cookie = `bambu_page=${OTHER_PAGE};path=/;max-age=31536000;samesite=lax`;
   location.reload();
@@ -1767,7 +1687,7 @@ $("designBtn").addEventListener("click", ()=>{
 // change needs them redrawn - including the day chart when it is on screen
 function redrawForPalette(){
   drawChart(); drawPowerChart();
-  if($("v-prints-history").classList.contains("on")) drawDayChart();
+  if($("tab-stats").classList.contains("on")) drawDayChart();
 }
 
 /* ---------- helpers ---------- */
@@ -1776,49 +1696,6 @@ const STATE_TOKEN = {
   Preparing:"--info", Slicing:"--info", Idle:"--text-3", Unknown:"--text-3"
 };
 const RING_C = 402; // 2*pi*64
-// the states in which a job is genuinely on the plate; anything else means the
-// Now panel should report standing state instead of a progress ring
-const BUSY_STATES = ["Printing", "Paused", "Preparing", "Slicing"];
-let idleState = true;
-// the last print list, cached from the 60 s refresh so the idle panel can
-// report the last job without a fetch of its own
-let printsCache = [], printsCur = "€";
-// the day picked in the per-day chart, or null for the whole history. Declared
-// here, not beside the chart: loadPrints() reads it and runs first.
-let dayFilter = null;
-
-/* The Now panel when nothing is printing. Says what the machine is doing, what
-   it printed last, and what is loaded - the three things you actually open the
-   page for when no job is running. */
-function renderIdle(j, s){
-  $("idleState").textContent = t(j.state_label === "Idle" ? "Ready" : (j.state_label || "Idle"));
-  const bits = [];
-  if(s.connected === false) bits.push(t("printer offline"));
-  const loaded = (s.ams && s.ams.trays || []).filter(x => x && (x.type || x.brand)).length;
-  if(loaded) bits.push(loaded + " " + t("spools loaded"));
-  const nozzle = (((s.temps||{}).nozzles)||[])[0];
-  if(nozzle && nozzle.temp != null) bits.push(t("nozzle") + " " + Math.round(nozzle.temp) + " °C");
-  $("idleSub").textContent = bits.join(" · ");
-
-  const last = printsCache.find(p => p.ended_at);
-  if(!last){ $("idleLast").innerHTML = ""; return; }
-  const name = last.label || last.design_title || last.name || "—";
-  const g = last.filament_g_manual != null ? last.filament_g_manual : last.filament_g;
-  const cell = (label, val) =>
-    `<div class="meta-item"><span class="meta-label">${t(label)}</span>
-       <span class="meta-val">${val}</span></div>`;
-  $("idleLast").innerHTML =
-    `<div class="meta-item" style="min-width:180px">
-       <span class="meta-label">${t("Last print")}</span>
-       <span class="meta-val" style="font-family:inherit;font-size:15px;font-weight:640;
-         overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:34ch"
-         title="${esc(name)}">${esc(name)}</span></div>`
-    + cell("Finished", new Date(last.ended_at*1000).toLocaleString([],
-        {month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit"}))
-    + cell("Took", fmtDur(last.started_at, last.ended_at))
-    + cell("Filament", g != null ? g.toFixed(0) + " g" : "—")
-    + cell("Cost", money(last.total_cost, printsCur));
-}
 
 function fmtEta(min){
   if(min==null||min<=0) return "—";
@@ -1945,15 +1822,6 @@ function render(s){
   $("liveEta").textContent = etaTxt;
   $("liveEnd").textContent = endTxt;
   $("spd").textContent = s.speed ? (s.speed.magnitude_pct!=null ? s.speed.magnitude_pct+"%" : "—") : "—";
-
-  // Printing or not decides what the panel is for: the ring and the controls
-  // while a job runs, a report of the machine's state and its last print when
-  // none does. Both live in the same card, so the page does not jump.
-  idleState = !BUSY_STATES.includes(j.state_label);
-  $("idleWrap").style.display = idleState ? "" : "none";
-  $("ringWrap").style.display = idleState ? "none" : "";
-  $("heroInfo").style.display = idleState ? "none" : "";
-  if(idleState) renderIdle(j, s);
 
   // temps
   if(tp.bed) setTemp("bed", tp.bed.cur, tp.bed.target, 120);
@@ -2116,7 +1984,7 @@ function render(s){
   const sig = amsSignature(s);
   if(sig !== filAmsSig){
     filAmsSig = sig;
-    if(VIEW.sec === "filament") loadFilaments();
+    if($("tab-filament").classList.contains("on")) loadFilaments();
   }
 
   // AMS spools
@@ -2273,18 +2141,13 @@ function niceStep(range, target){
   return (n<=1?1:n<=2?2:n<=5?5:10)*mag;
 }
 
-// A failed fetch is already handled; a request that succeeds but answers with
-// something other than a list is not, and the charts would then throw on every
-// redraw - including from the router, which calls them when Now comes up.
 async function loadTempHistory(){
-  try{ const r=await fetch("/api/history?hours="+tempHours); const d=await r.json();
-       tempData = Array.isArray(d) ? d : []; }
+  try{ const r=await fetch("/api/history?hours="+tempHours); tempData=await r.json(); }
   catch(_){ tempData=[]; }
   drawChart();
 }
 async function loadPowerHistory(){
-  try{ const r=await fetch("/api/history?hours="+powerHours); const d=await r.json();
-       powerData = Array.isArray(d) ? d : []; }
+  try{ const r=await fetch("/api/history?hours="+powerHours); powerData=await r.json(); }
   catch(_){ powerData=[]; }
   drawPowerChart();
 }
@@ -2546,25 +2409,6 @@ async function deletePrint(job, name, row){
 $("histTable").addEventListener("click", async e=>{
   const del = e.target.closest("button.del-btn");
   if(del){ deletePrint(del.dataset.job, del.dataset.name, del.closest("tr")); return; }
-  const exp = e.target.closest("button.exp-btn");
-  if(exp){
-    const job = exp.dataset.exp;
-    // toggled in place: re-rendering the whole table would collapse the group
-    // folds and lose the scroll position
-    const tr = exp.closest("tr"), next = tr.nextElementSibling;
-    if(histDet.has(job)){
-      histDet.delete(job);
-      if(next && next.classList.contains("detail")) next.remove();
-      exp.classList.remove("open");
-    } else {
-      const row = (lastPrints||[]).find(r => r.job_id === job);
-      if(!row) return;
-      histDet.add(job);
-      tr.insertAdjacentHTML("afterend", detailRow(row, printsCur));
-      exp.classList.add("open");
-    }
-    return;
-  }
   const ren = e.target.closest("button.gbtn");
   if(ren){
     const old = ren.dataset.grp;
@@ -2646,17 +2490,8 @@ async function loadPrints(){
   let d;
   try{ d = await (await fetch("/api/prints?limit=60")).json(); }
   catch(_){ return; }
-  const allRows = d.prints||[], cur = d.currency||"€";
-  lastPrints = allRows;       // the group header needs every member's job_id
-  printsCache = allRows; printsCur = cur;
-  // the chart above can narrow the table to one day; the caches above stay
-  // complete, so group membership and the idle panel still see everything
-  const rows = dayFilter
-    ? allRows.filter(r => r.started_at && dayKey(new Date(r.started_at*1000)) === dayFilter)
-    : allRows;
-  // this refresh runs whatever view is on screen, so the idle panel's "last
-  // print" stays current without a fetch of its own
-  if(idleState && lastState) renderIdle(lastState.job || {}, lastState);
+  const rows = d.prints||[], cur = d.currency||"€";
+  lastPrints = rows;          // the group header needs every member's job_id
   const tb = $("histTable").querySelector("tbody");
   if(!rows.length){
     tb.innerHTML = `<tr><td style="color:var(--text-3);padding:10px 0">${t("No prints recorded yet — the first one appears here as soon as it starts.")}</td></tr>`;
@@ -2695,10 +2530,10 @@ async function loadPrints(){
          <th class="num">${t("Layers")}</th><th class="num">${t("Duration")}</th>
          <th class="num">${t("Energy")}</th><th class="num">${t("Power")}&nbsp;€</th>
          <th class="num">${t("Filament")}</th><th class="num">${t("Filament")}&nbsp;€</th>
-         <th class="num">${t("Total")}</th><th class="del"></th><th class="exp"></th></tr>` +
+         <th class="num">${t("Total")}</th><th class="del"></th></tr>` +
     items.map(it=>{
       if(it.divider)
-        return `<tr class="divider"><td colspan="13">${esc(it.divider)} (${it.n})</td></tr>`;
+        return `<tr class="divider"><td colspan="12">${esc(it.divider)} (${it.n})</td></tr>`;
       if(it.group)
         return groupHead(it, cur)
              + (histOpen.has(it.group) ? it.rows.map(r=> printRow(r, cur)).join("") : "");
@@ -2741,7 +2576,7 @@ function groupHead(g, cur){
   const h = Math.floor(secs/3600), m = Math.round((secs%3600)/60);
   return `<tr class="grp${shut?" closed":""}" data-grp="${esc(g.group)}"
       title="${t("click to fold · drop prints here to add them")}">
-    <td colspan="13"><div class="grp-row">
+    <td colspan="12"><div class="grp-row">
       <span class="grp-caret">▾</span>
       <span class="grp-name">${esc(g.group)}</span>
       <button class="gbtn" data-act="rename" data-grp="${esc(g.group)}"
@@ -2800,75 +2635,13 @@ function printRow(r, cur){
         <td class="del"><button class="del-btn" type="button"
             data-job="${esc(r.job_id)}" data-name="${esc(r.label || auto)}"
             title="${t("delete this print")}" aria-label="${t("delete this print")}">✕</button></td><!-- a genuinely live print is refused server-side -->
-        <td class="exp"><button class="exp-btn${histDet.has(r.job_id)?" open":""}" type="button"
-            data-exp="${esc(r.job_id)}" title="${t("show everything about this print")}"
-            aria-label="${t("show everything about this print")}">▶</button></td>
-      </tr>` + (histDet.has(r.job_id) ? detailRow(r, cur) : "");
+      </tr>`;
     }).join("");
-}
-
-/* Everything known about one print, in one place. These facts exist today but
-   are scattered: grams on this table, the per-slot breakdown in a title
-   attribute, cost on the overview, the model link in the name cell. */
-function detailRow(r, cur){
-  const det = Array.isArray(r.filament_detail) ? r.filament_detail : [];
-  const grams = r.filament_g_manual != null ? r.filament_g_manual : r.filament_g;
-  const line = (k, v) => `<span class="k">${t(k)}</span><span class="v">${v}</span>`;
-  const when = ts => ts ? new Date(ts*1000).toLocaleString([],
-      {year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}) : "—";
-  const mwUrl = r.design_id
-    ? "https://makerworld.com/models/" + encodeURIComponent(r.design_id)
-      + (r.profile_id ? "#profileId-" + encodeURIComponent(r.profile_id) : "")
-    : null;
-  return `<tr class="detail"><td colspan="13"><div class="det">
-    <div>
-      <h4>${t("Run")}</h4>
-      <div class="dl">
-        ${line("Started", when(r.started_at))}
-        ${line("Ended", when(r.ended_at))}
-        ${line("Duration", fmtDur(r.started_at, r.ended_at))}
-        ${line("Layers", r.total_layers ?? "—")}
-        ${r.error_code ? line("Error", esc(r.error_code)) : ""}
-      </div>
-    </div>
-    <div>
-      <h4>${t("Filament")}</h4>
-      ${det.length ? det.map(x=>`<div class="slot">
-          <span class="sw" style="--sw:${esc(x.color || "#888")}"></span>
-          <span>${t("Slot")} ${x.slot} · ${esc([x.brand, x.type].filter(Boolean).join(" ")) || "?"}</span>
-          <span class="sg">${(x.grams ?? 0).toFixed(1)} g</span>
-        </div>`).join("")
-        : `<div class="none">${grams != null
-             ? t("no per-slot detail recorded") : t("nothing recorded")}</div>`}
-      <div class="dl" style="margin-top:9px">
-        ${line("Total", grams != null ? grams.toFixed(1) + " g" : "—")}
-      </div>
-    </div>
-    <div>
-      <h4>${t("Cost")}</h4>
-      <div class="dl">
-        ${line("Energy", r.energy_wh != null ? r.energy_wh.toFixed(0) + " Wh" : "—")}
-        ${line("Power", money(r.cost, cur))}
-        ${line("Material", money(r.filament_cost, cur))}
-        ${line("Total", `<b>${money(r.total_cost, cur)}</b>`)}
-      </div>
-    </div>
-    <div>
-      <h4>${t("Filing")}</h4>
-      <div class="dl">
-        ${line("Group", r.pgroup ? esc(r.pgroup) : "—")}
-        ${line("Slicer profile", r.name ? esc(r.name) : "—")}
-      </div>
-      ${mwUrl ? `<a class="mw-link" style="margin-top:9px" href="${mwUrl}" target="_blank"
-                   rel="noopener noreferrer">${t("View on MakerWorld")} ↗</a>` : ""}
-    </div>
-  </div></td></tr>`;
 }
 
 /* ---------- history: selection & manual grouping ---------- */
 const histSel = new Set();   // job_ids ticked; survives the 60 s auto-refresh
 const histOpen = new Set();  // groups folded open, collapsed by default
-const histDet = new Set();   // prints expanded to their detail panel
 let histView = localStorage.getItem("bambu-histview") || "timeline";
 $("histViewSeg").addEventListener("click", e=>{
   if(e.target.tagName !== "BUTTON") return;
@@ -3126,43 +2899,7 @@ function drawDayChart(){
     cross.setAttribute("opacity", 0);
     tip.style.opacity = 0;
   });
-  // A bar and the rows behind it are the same prints at two zoom levels, so the
-  // chart selects and the table below follows. Clicking the selected day again
-  // clears it.
-  hit.addEventListener("click", ev=>{
-    const rc = svg.getBoundingClientRect(), sx = (ev.clientX-rc.left)/rc.width*W;
-    const i = Math.max(0, Math.min(cells.length-1, Math.floor((sx-m.l)/bw)));
-    if(!cells[i].v) return;                      // an empty day filters to nothing
-    setDayFilter(dayFilter === cells[i].k ? null : cells[i].k);
-  });
-  if(dayFilter){
-    const i = cells.findIndex(c=> c.k === dayFilter);
-    if(bars[i]) bars[i].classList.add("picked");
-  }
 }
-
-function setDayFilter(k){
-  dayFilter = k;
-  const bar = $("dayFilterBar");
-  bar.classList.toggle("on", !!k);
-  if(k){
-    const [y,mo,d] = k.split("-");
-    $("dayFilterTxt").textContent =
-      t("Showing") + " " + new Date(+y, +mo-1, +d).toLocaleDateString([],
-        {weekday:"long", day:"2-digit", month:"long", year:"numeric"});
-  }
-  drawDayChart();     // repaint so the selected bar is outlined
-  loadPrints();
-}
-$("dayFilterClear").addEventListener("click", ()=> setDayFilter(null));
-
-/* The order importer opens on request and stays open once used, so a mistyped
-   line can be corrected without hunting for the button again. */
-$("buyImportBtn").addEventListener("click", ()=>{
-  const open = $("buyImport").classList.toggle("on");
-  $("buyImportBtn").textContent = t(open ? "− Hide the importer" : "+ Add an order");
-  if(open) $("buyImport").scrollIntoView({behavior:"smooth", block:"nearest"});
-});
 async function loadStats(){
   let d;
   try{ d = await (await fetch("/api/stats")).json(); }catch(_){ return; }
@@ -4257,87 +3994,35 @@ function setLive(on){
   try{
     CAM = await (await fetch("/api/camera")).json();
     if(CAM && CAM.enabled){
-      $("liveSec").style.display = "";
-      // the stored view may have been Live, which was refused while CAM was
-      // still unknown - now that it exists, go there
-      if((localStorage.getItem("bambu-view")||"").startsWith("live/")) go("live", "camera", true);
+      $("liveTabBtn").style.display = "";
+      if((localStorage.getItem("bambu-tab")||"") === "live") setLive(true);
     }
   }catch(_){}
 })();
 
-/* ---------- navigation ----------
-   Four sections, each with its own views. One map drives the second-level bar,
-   the routing and the address bar, so a view cannot exist in one and be missing
-   from another. The hash makes every view linkable and the back button work. */
-const NAV = {
-  printer:  [["now","Now"], ["machine","Hardware"], ["raw","Raw data"]],
-  prints:   [["history","History"], ["statistics","Statistics"]],
-  filament: [["inventory","Inventory"], ["purchases","Purchases"]],
-  workshop: [["maintenance","Maintenance"], ["notes","Notes"]],
-  live:     [["camera","Live view"]],
-};
-const VIEW = {sec:"printer", view:"now"};
-// what to (re)load when a view comes on screen
-const ON_SHOW = {
-  // charts keep fixed viewBox coordinates while hidden, but a redraw after the
-  // view is visible keeps their hover geometry honest
-  "printer/now":        ()=>{ drawChart(); drawPowerChart(); },
-  "prints/history":     ()=>{ loadPrints(); loadStats(); },
-  "prints/statistics":  ()=>{ loadStats(); },
-  "filament/inventory": ()=>{ loadFilaments(); },
-  "filament/purchases": ()=>{ loadFilaments(); },
-  "workshop/maintenance": ()=>{ loadMaint(); },
-  "workshop/notes":     ()=>{ loadNotes(); },
-};
-function go(sec, view, replace){
-  if(!NAV[sec]) sec = "printer";
-  // Live exists only when a camera is configured, so a stored view or a pasted
-  // link pointing at it must land somewhere real instead of on a blank page
-  if(sec === "live" && !(CAM && CAM.enabled)) sec = "printer";
-  if(!NAV[sec].some(v => v[0] === view)) view = NAV[sec][0][0];
-  VIEW.sec = sec; VIEW.view = view;
-  const key = sec + "/" + view;
-
-  document.querySelectorAll("#sections button").forEach(b=>
-    b.classList.toggle("on", b.dataset.sec === sec));
-  // a section with a single view has nothing to choose between, so it gets no
-  // second-level bar rather than a bar with one entry in it
-  $("subnav").innerHTML = NAV[sec].length < 2 ? "" :
-    NAV[sec].map(([v,label])=>
-      `<button data-view="${v}"${v===view?' class="on"':''} data-i18n="${label}">${t(label)}</button>`
-    ).join("") + `<span class="sub-note" id="subNote"></span>`;
-  $("subnav").classList.toggle("empty", NAV[sec].length < 2);
-  document.querySelectorAll(".view").forEach(p=>
-    p.classList.toggle("on", p.id === "v-" + sec + "-" + view));
-
-  localStorage.setItem("bambu-view", key);
-  const hash = "#" + key;
-  if(location.hash !== hash) history[replace ? "replaceState" : "pushState"](null, "", hash);
-  // the camera streams only while it is on screen, never in the background
-  setLive(sec === "live");
-  // navigation has already happened by this point; a loader that fails must not
-  // be able to leave the page half-switched
-  try{ (ON_SHOW[key] || (()=>{}))(); }
-  catch(e){ console.error("view " + key + " failed to load:", e); }
+/* ---------- tabs ---------- */
+function showTab(name){
+  // never land on a hidden Live view tab (camera disabled)
+  if(name === "live" && !(CAM && CAM.enabled)) name = "overview";
+  document.querySelectorAll(".tab-panel").forEach(p=>
+    p.classList.toggle("on", p.id === "tab-"+name));
+  document.querySelectorAll("#tabs button").forEach(b=>
+    b.classList.toggle("on", b.dataset.tab === name));
+  localStorage.setItem("bambu-tab", name);
+  setLive(name === "live");
+  // charts use fixed viewBox coordinates so they survive being hidden, but a
+  // redraw keeps the hover geometry honest after the panel becomes visible
+  if(name === "overview"){ drawChart(); drawPowerChart(); }
+  if(name === "stats"){ loadStats(); }
+  if(name === "filament"){ loadFilaments(); }
+  if(name === "notes"){ loadNotes(); }
+  if(name === "maintenance"){ loadMaint(); }
 }
-$("sections").addEventListener("click", e=>{
+$("tabs").addEventListener("click", e=>{
   const b = e.target.closest("button");
-  // returning to a section lands on its first view
-  if(b) go(b.dataset.sec, NAV[b.dataset.sec][0][0]);
+  if(b) showTab(b.dataset.tab);
 });
-$("subnav").addEventListener("click", e=>{
-  const b = e.target.closest("button");
-  if(b) go(VIEW.sec, b.dataset.view);
-});
-addEventListener("hashchange", ()=>{
-  const [s,v] = location.hash.replace(/^#/, "").split("/");
-  if(s && (s !== VIEW.sec || v !== VIEW.view)) go(s, v, true);
-});
-(function(){
-  const from = location.hash.replace(/^#/, "") || localStorage.getItem("bambu-view") || "printer/now";
-  const [s,v] = from.split("/");
-  go(s, v, true);
-})();
+showTab(localStorage.getItem("bambu-tab") || "overview");
 
 /* ---------- health warnings dropdown ---------- */
 $("healthBtn").addEventListener("click", e=>{

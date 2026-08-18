@@ -28,8 +28,12 @@ over TCP, not the PHP socket.
 ## 3. Copy the app onto the NAS
 Create a shared folder or reuse one, and copy the whole `bambu-monitor` folder to
 e.g. **`/volume1/apps/bambu-monitor`** (File Station drag-and-drop is fine).
-You need at least: `app.py`, `bambu_state.py`, `storage.py`,
-`printer.config.json`, `dashboard.html`, `requirements.txt`, `deploy/`.
+You need at least: `app.py`, `bambu_state.py`, `storage.py`, `filament_catalog.py`,
+`printer.config.json`, `dashboard.html`, `classic.html`, `requirements.txt`,
+`deploy/`.
+
+> `classic.html` is the previous eight-tab layout, kept as the way back from the
+> ✦ button. Leave it out and the button simply falls back to `dashboard.html`.
 
 > If you put it somewhere other than `/volume1/apps/bambu-monitor`, edit `APP_DIR`
 > at the top of [`start.sh`](start.sh) to match.

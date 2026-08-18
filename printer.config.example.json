@@ -32,6 +32,10 @@
     "color_names": { "A00-W01": "Jade White" }
   },
 
+  "controls": {
+    "allow_gcode": false
+  },
+
   "storage": {
     "backend": "sqlite",
     "sqlite_path": "telemetry.db",
