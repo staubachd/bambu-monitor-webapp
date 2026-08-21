@@ -106,10 +106,21 @@ per print must be accurate)
   read as a project list — and *Only singles*. The summary line counts what is on
   screen, not what exists
 - **MakerWorld links** — jobs sliced from MakerWorld show a link straight to the
-  source model (deep-linked to the exact print profile), on both the live job tile
-  and each history row; the `design_id`/`profile_id` are captured to the database
+  source model (deep-linked to the exact print profile), on the live job tile,
+  each history row and the expanded print; the `design_id`/`profile_id` are
+  captured to the database.
+  `design_id` is **machine state, not job state**: the printer keeps reporting
+  the last model it printed and never clears it for a self-sliced job, so a print
+  started afterwards used to inherit the previous print's link. Only an id that
+  *changed* since the job began is attributed to it. An id identical to the
+  previous job's is ambiguous — a repeat print and a leftover look the same from
+  the printer — so it is refused live and recovered afterwards from the cloud's
+  per-task **design title**, which was never wrong. Rows already stored with an
+  inherited link are repairable with
+  [`tools/fix_design_ids.py`](tools/fix_design_ids.py) (reports by default,
+  `--apply` clears)
 
-**Filament page** (own tab)
+**Filament section**
 - A historical overview of **every filament ever used**: grams, material cost,
   number of prints, share of total consumption, and when it was last used
 - Populated **retroactively** — usage is summed from the per-slot detail already
@@ -124,7 +135,13 @@ per print must be accurate)
   — and it is what lets purchases match it, wording being the sole route without a
   colour code. Genuine spools show *Bambu Lab* without anyone typing it
 - Shows which filaments are **in the AMS right now** (slot, remaining %, Low flag)
-  with the same **Reorder ↗** link, so the page doubles as a shopping list
+  with the same **Reorder ↗** link, so the page doubles as a shopping list.
+  A spool only shows a slot when the identity of the live tray is the *same*
+  identity as the row, and for a third-party spool the two sources can disagree
+  (the AMS reports whatever profile is set on the printer, the cloud reports the
+  one you sliced with). [`tools/why_not_in_ams.py`](tools/why_not_in_ams.py) asks
+  the running app what is in each tray, works out the identity that makes, and
+  names the near-miss row when it differs — that split is what **merge** is for
 - **Search and sort**: type to match vendor, product, colour name, colour code,
   hex or material; narrow to *In AMS · Low · unused*; click any column header to
   sort by it. Both are applied to the data already loaded — no refetch — and the
@@ -240,6 +257,22 @@ server-side allowlist** — never a free-form gcode passthrough)
   the machine **is** and what it printed last, instead of an empty progress ring.
 - **Printer · Hardware** holds the standing facts about the machine — identity,
   AI monitoring, and the fans.
+- **The browser tab is a status light.** This page spends most of its life in the
+  background, so the print's state is readable from the tab strip itself:
+  - the **title** carries it in words — `68% · Dragon_body`, then
+    `✓ Finished · Dragon_body` (translated, so `✓ Fertig …` in German)
+  - the **favicon** is drawn on a canvas at runtime: a ring that fills while
+    printing, closing into a green tick when the job is done or a red ✕ when it
+    failed. Idle restores the normal printer glyph. No asset, no request.
+  - a finish that happens **while the tab is hidden is latched**: the printer
+    drops back to `Idle` a while after a print ends, and without the latch the
+    one thing you left the tab open for would vanish before you looked. It clears
+    on the next `visibilitychange`, i.e. the moment you look at the tab.
+
+  A desktop notification would be the obvious alternative, but the Notification
+  API needs a **secure context** and the NAS is served over plain `http://`, so
+  the tab is the whole channel. `scratchpad/bm/t_tabflag.js` drives the real
+  function through a print's life to check the latch survives the drop to `Idle`.
 - **Prints · History** is the per-day chart and the table together: **clicking a
   bar filters the table to that day**, and clicking it again clears it.
 - **Every print expands** into one panel holding its run, its per-slot filament

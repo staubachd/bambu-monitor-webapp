@@ -59,10 +59,15 @@ PRINT_COLS = ["job_id", "name", "started_at", "ended_at", "final_state",
 #                       nothing about them and would otherwise null them out
 #   pgroup            - user-assigned group, same reasoning as label
 #   ams_slots         - what the AMS held while the print ran, written once
+#   design_id/profile_id - the MakerWorld link. The printer reports it as machine
+#                       state and stops reporting it for a self-sliced job, so a
+#                       blanket upsert would first inherit the previous print's
+#                       link and then null out a correct one. Written only when
+#                       something actually has a value for it.
 PRINT_IMMUTABLE = {"job_id", "started_at", "label", "design_title",
                    "filament_g", "filament_g_manual", "filament_detail",
                    "filament_cost", "ams_bambu", "error_code", "pgroup",
-                   "ams_slots"}
+                   "ams_slots", "design_id", "profile_id"}
 
 # Identity of every filament ever seen in the AMS, so the Filament page can name
 # a spool long after it has been used up and removed. Usage figures are NOT here:
@@ -118,11 +123,19 @@ class Storage:
         self.backend = cfg.get("backend", "sqlite")
         if self.backend == "mariadb":
             import pymysql  # lazy: only needed on the NAS
+            from pymysql.constants import CLIENT
             m = cfg["mariadb"]
+            # FOUND_ROWS makes cursor.rowcount after an UPDATE count the rows
+            # MATCHED, not the rows whose values actually differed. Every
+            # `return n > 0` in this file means "the row existed", and without
+            # this flag MariaDB answers 0 for a save that writes what was already
+            # there - so re-saving an unchanged name reported "no such filament"
+            # while the same code was fine on sqlite, which counts matches.
             self._connect = lambda: pymysql.connect(
                 host=m.get("host", "127.0.0.1"), port=int(m.get("port", 3306)),
                 user=m["user"], password=m["password"], database=m["database"],
                 autocommit=True, charset="utf8mb4",
+                client_flag=CLIENT.FOUND_ROWS,
             )
             self.ph = "%s"
             self._auto = "AUTO_INCREMENT"
@@ -306,6 +319,22 @@ class Storage:
         else:
             cur.close(); conn.close()
         return n > 0
+
+    def design_id_for_title(self, title: str, exclude_job: str = "") -> tuple | None:
+        """The MakerWorld ids most recently recorded against this exact design
+        title. The live path refuses to attribute a repeated model id to a new
+        job (it cannot tell a repeat print from a leftover); the cloud gives that
+        job an authoritative title, and the same title means the same model."""
+        conn, cur = self._cursor()
+        cur.execute(
+            f"SELECT design_id, profile_id FROM prints "
+            f"WHERE design_title={self.ph} AND design_id IS NOT NULL "
+            f"AND job_id<>{self.ph} ORDER BY started_at DESC",
+            (title, exclude_job))
+        row = cur.fetchone()
+        if self.backend != "sqlite":
+            cur.close(); conn.close()
+        return (row[0], row[1]) if row else None
 
     def get_print(self, job_id: str) -> dict | None:
         conn, cur = self._cursor()

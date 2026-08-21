@@ -1775,6 +1775,104 @@ const STATE_TOKEN = {
   Printing:"--accent", Finished:"--good", Paused:"--warn", Failed:"--danger",
   Preparing:"--info", Slicing:"--info", Idle:"--text-3", Unknown:"--text-3"
 };
+/* ---------- tab indicator ----------
+   This page spends most of its life as a background tab, so the state of the
+   print has to be readable from the tab strip itself. Two channels, both of
+   which survive a NAS served over plain http:// - a desktop notification would
+   need a secure context and is simply not available here:
+
+     the title    carries it in words, which is what Firefox shows on hover and
+                  what a narrow tab still shows a few characters of
+     the favicon  carries it as a ring that fills while printing and closes into
+                  a tick when the job is done
+
+   A finish that happens while the tab is hidden is LATCHED: the printer drops
+   back to Idle a while after a print ends, and without the latch the one thing
+   you left the tab open for would quietly disappear before you looked. It
+   clears the moment the tab is looked at. */
+const BASE_TITLE = document.title;
+const FAV_DEFAULT = document.querySelector('link[rel="icon"]').href;
+const FAV_COLOR = {Printing:"#4f8ef7", Paused:"#f59e0b", Finished:"#22c55e",
+                   Failed:"#ef4444", Preparing:"#60a5fa", Slicing:"#60a5fa"};
+const DONE_STATES = ["Finished", "Failed"];
+const favCanvas = document.createElement("canvas");
+favCanvas.width = favCanvas.height = 32;
+
+function drawFavicon(state, pct){
+  const g = favCanvas.getContext("2d");
+  g.clearRect(0, 0, 32, 32);
+  const col = FAV_COLOR[state] || "#8b93a1";
+  // a dark disc under everything, so the mark reads on a light *and* a dark tab
+  // strip without knowing which one the browser is using
+  g.beginPath(); g.arc(16, 16, 15.5, 0, Math.PI*2);
+  g.fillStyle = "#12141a"; g.fill();
+  g.beginPath(); g.arc(16, 16, 11, 0, Math.PI*2);
+  g.lineWidth = 6; g.strokeStyle = "rgba(255,255,255,.20)"; g.stroke();
+  if(state === "Printing" || state === "Paused" || state === "Preparing"){
+    if(pct > 0){
+      g.beginPath();
+      g.arc(16, 16, 11, -Math.PI/2, -Math.PI/2 + Math.PI*2*(Math.min(pct,100)/100));
+      g.lineWidth = 6; g.lineCap = "butt"; g.strokeStyle = col; g.stroke();
+    }
+  } else {
+    g.beginPath(); g.arc(16, 16, 11, 0, Math.PI*2);
+    g.lineWidth = 6; g.strokeStyle = col; g.stroke();
+    g.lineWidth = 3.6; g.lineCap = "round"; g.strokeStyle = col;
+    if(state === "Finished"){
+      g.beginPath(); g.moveTo(10.5, 16.5); g.lineTo(14.3, 20.2); g.lineTo(21.5, 12.2); g.stroke();
+    } else if(state === "Failed"){
+      g.beginPath(); g.moveTo(11.5, 11.5); g.lineTo(20.5, 20.5);
+      g.moveTo(20.5, 11.5); g.lineTo(11.5, 20.5); g.stroke();
+    }
+  }
+  return favCanvas.toDataURL("image/png");
+}
+// Firefox will not always pick up a changed href on the existing element, so
+// the link is replaced rather than mutated
+function setFavicon(href){
+  const old = document.querySelector('link[rel="icon"]');
+  const link = document.createElement("link");
+  link.rel = "icon"; link.href = href;
+  if(old) old.remove();
+  document.head.appendChild(link);
+}
+
+let tabKey = null;        // what is currently painted, so nothing is redrawn per tick
+let doneLatch = null;     // a finish nobody has seen yet
+let prevBusy = false;
+function updateTab(j){
+  const state = j.state_label || "Idle";
+  const busy = BUSY_STATES.includes(state);
+  // the transition into a finished state is the event, not the state itself -
+  // the printer keeps reporting FINISH long afterwards
+  if(prevBusy && DONE_STATES.includes(state) && document.hidden) doneLatch = state;
+  if(busy) doneLatch = null;                       // a new job supersedes it
+  prevBusy = busy;
+
+  const show = doneLatch || state;
+  const pct = j.percent != null ? j.percent : 0;
+  const name = j.label || j.design_title || j.name || "";
+  const key = show + "|" + (busy ? Math.round(pct) : "");
+  if(key === tabKey) return;
+  tabKey = key;
+
+  let head = "";
+  if(show === "Printing")       head = `${Math.round(pct)}%`;
+  else if(show === "Paused")    head = `⏸ ${Math.round(pct)}%`;
+  else if(show === "Finished")  head = `✓ ${t("Finished")}`;
+  else if(show === "Failed")    head = `✕ ${t("Failed")}`;
+  else if(busy)                 head = t(show);
+  document.title = head ? `${head}${name ? " · " + name : ""} — ${BASE_TITLE}` : BASE_TITLE;
+  setFavicon(show === "Idle" || show === "Unknown" ? FAV_DEFAULT : drawFavicon(show, pct));
+}
+// looking at the tab is what clears a latched finish
+addEventListener("visibilitychange", ()=>{
+  if(!document.hidden && doneLatch){
+    doneLatch = null; tabKey = null;
+    if(lastState) updateTab(lastState.job || {});
+  }
+});
+
 const RING_C = 402; // 2*pi*64
 // the states in which a job is genuinely on the plate; anything else means the
 // Now panel should report standing state instead of a progress ring
@@ -1954,6 +2052,7 @@ function render(s){
   $("ringWrap").style.display = idleState ? "none" : "";
   $("heroInfo").style.display = idleState ? "none" : "";
   if(idleState) renderIdle(j, s);
+  updateTab(j);
 
   // temps
   if(tp.bed) setTemp("bed", tp.bed.cur, tp.bed.target, 120);

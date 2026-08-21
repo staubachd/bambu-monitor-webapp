@@ -235,6 +235,9 @@ def _track_print(state: dict) -> None:
             prev = store.get_print(tid)
         except Exception:
             prev = None
+        # What the printer is reporting as the model right now belongs to the
+        # job that just ENDED. Remember it so this one cannot inherit the link.
+        _print_row["carried_design"] = _print_row.get("design_id")
         _print_row.update(
             job_id=tid, stored=prev or {},
             started_at=(prev or {}).get("started_at") or time.time(),
@@ -262,12 +265,21 @@ def _track_print(state: dict) -> None:
             # first moment we actually see it printing - that's the real start
             _print_row["started_at"] = time.time()
         _print_row["seen_active"] = True
-    # Latch the MakerWorld reference: Bambu's incremental reports frequently omit
-    # design_id/profile_id, so only overwrite when this frame actually carries them.
-    if job.get("design_id"):
-        _print_row["design_id"] = job["design_id"]
-    if job.get("profile_id"):
-        _print_row["profile_id"] = job["profile_id"]
+    # The MakerWorld reference is machine state, not job state - exactly like
+    # print_error. The printer keeps reporting the last model it printed long
+    # after that job is gone, so a self-sliced print started afterwards inherits
+    # the previous print's link. Two rules:
+    #   * incremental frames often omit the field, so only a frame that actually
+    #     carries one may overwrite the latch;
+    #   * an id identical to the PREVIOUS job's is ambiguous - a repeat print and
+    #     a leftover look exactly the same from here - so it is refused. The
+    #     cloud pass resolves that case later, by design title.
+    reported = job.get("design_id")
+    if reported and reported != _print_row.get("carried_design"):
+        _print_row["design_id"] = reported
+        # the profile identifies a plate WITHIN a design, so it is only ever
+        # meaningful paired with the design it arrived with
+        _print_row["profile_id"] = job.get("profile_id") or _print_row.get("profile_id")
     w = (state.get("power") or {}).get("watts")
     if w:
         _print_row["peak_w"] = max(_print_row["peak_w"], float(w))
@@ -331,12 +343,17 @@ def _persist_print(state: dict) -> None:
             energy_wh=energy,
             cost=cost,
             peak_w=peak,
-            design_id=_print_row.get("design_id"),
-            profile_id=_print_row.get("profile_id"),
         )
         _print_row["stored"] = {**stored, "energy_wh": energy, "peak_w": peak,
                                 "started_at": _print_row["started_at"],
                                 "ended_at": ended}
+        # Set, never blank: upsert_print treats these as immutable precisely so
+        # a job that reports no model cannot wipe one that does.
+        did = _print_row.get("design_id")
+        if did and did != stored.get("design_id"):
+            store.update_print_fields(tid, design_id=did,
+                                      profile_id=_print_row.get("profile_id"))
+            _print_row["stored"]["design_id"] = did
         # Capture why it failed, while the printer is still reporting it - but
         # not the previous job's failure, which the printer is still showing
         # because nothing clears it when a new print starts.
@@ -1343,10 +1360,23 @@ def _apply_cloud_task(task: dict) -> bool:
             extra["final_state"] = "FINISH"
         print(f"[cloud] closed orphaned print {job_id}")
 
+    # The live path refuses a model id identical to the previous job's, because
+    # a repeat print and a leftover are indistinguishable from the printer. The
+    # cloud settles it: the title is per-task and authoritative, and the same
+    # title is the same model, so the id can be recovered from an earlier print
+    # of it. A job whose title never matched anything simply keeps no link.
+    title = task.get("designTitle") or None
+    if title and not row.get("design_id"):
+        found = store.design_id_for_title(title, job_id)
+        if found:
+            extra["design_id"], extra["profile_id"] = found
+            print(f"[cloud] {job_id}: model id {found[0]} recovered from an "
+                  f"earlier print of '{title}'")
+
     store.update_print_fields(
         job_id,
         **extra,
-        design_title=task.get("designTitle") or None,
+        design_title=title,
         filament_g=round(grams_total, 2) or None,
         filament_detail=json.dumps(detail) if detail else None,
         filament_cost=round(fil_cost, 4) if fil_cost else None,
