@@ -752,6 +752,64 @@ PRICES_FROM_ORDERS = bool(FIL_CFG.get("prices_from_orders", True))
 _ORDER_PRICES: dict = {}
 
 
+# {fkey: EUR per kg} typed in by hand on the Filament page. Beats every other
+# rule: the config matrix is a guess about a brand and a material, an order is a
+# guess that the SKU on the invoice is the spool in the tray, and this is
+# neither - it is somebody stating what the spool cost.
+_FIL_PRICES: dict = {}
+_FIL_ALIAS: dict = {}
+# fkey -> (vendor, product, colour name) as typed in on the Filament page. The
+# AMS can only name a spool it can read, so a third-party tray arrives with no
+# name at all - but the identity it reports is the same one that was named, and
+# a name that only shows on one page is half a name.
+_FIL_NAMES: dict = {}
+# fkey -> (SKU, was the RFID tag genuine). After a merge the folded prints have
+# to be priced as the filament they were merged INTO, and that needs the
+# survivor's SKU - the entry's own is the one that was wrong.
+_FIL_ID: dict = {}
+
+
+def _rebuild_filament_meta() -> None:
+    """Reload what the user has told us about each filament: the hand-set
+    prices, the names, and the merge map both have to follow.
+
+    Cached because the AMS enrichment runs on the MQTT frame rate and this is
+    edited by hand a few times a month.
+    """
+    try:
+        rows = store.all_filaments()
+    except Exception as e:
+        print(f"[filament] could not read prices: {e}")
+        return
+    _FIL_PRICES.clear()
+    _FIL_ALIAS.clear()
+    _FIL_NAMES.clear()
+    _FIL_ID.clear()
+    for r in rows:
+        if r.get("alias_of"):
+            _FIL_ALIAS[r["fkey"]] = r["alias_of"]
+        if r.get("price_per_kg") is not None:
+            _FIL_PRICES[r["fkey"]] = float(r["price_per_kg"])
+        named = (r.get("vendor"), r.get("product"), r.get("color_name"))
+        if any(named):
+            _FIL_NAMES[r["fkey"]] = named
+        _FIL_ID[r["fkey"]] = (r.get("filament_id"),
+                              None if r.get("is_bambu") is None else bool(r["is_bambu"]))
+
+
+def _canon_fkey(fkey: str, hops: int = 6) -> str:
+    """Follow merges, so a price set on the surviving row prices the folded ones
+    too - otherwise merging two identities would silently split their price."""
+    seen = set()
+    while hops > 0 and fkey not in seen:
+        seen.add(fkey)
+        nxt = _FIL_ALIAS.get(fkey)
+        if not nxt or nxt == fkey:
+            break
+        fkey, hops = nxt, hops - 1
+    return fkey
+
+
 def _rebuild_order_prices() -> None:
     """{SKU: € per kg} from the purchase log; the newest order for a SKU wins.
 
@@ -775,6 +833,7 @@ def _rebuild_order_prices() -> None:
 
 
 _rebuild_order_prices()
+_rebuild_filament_meta()
 
 
 def _enrich_ams(state: dict) -> None:
@@ -787,6 +846,16 @@ def _enrich_ams(state: dict) -> None:
             tr.update(filament_catalog.describe(
                 tr, overrides=_color_overrides(),
                 region=FIL_STORE_REGION, host=FIL_STORE_HOST))
+            # What this spool was called on the Filament page. For a spool with
+            # no RFID that is the ONLY name it can have; for a Bambu one a name
+            # typed in by hand beats the catalogue, which is the same rule the
+            # Filament page follows.
+            vendor, product, cname = _FIL_NAMES.get(_canon_fkey(
+                filament_catalog.key(tr.get("filament_id"), tr.get("color"),
+                                     tr.get("type"))), (None, None, None))
+            if vendor:  tr["vendor"] = vendor
+            if product: tr["product"] = product
+            if cname:   tr["color_name"] = cname
             pct = tr.get("remain_pct")
             # Only an RFID spool reports a real remaining %: a third-party tray
             # sends -1 and an external spool sends 0, and neither means empty -
@@ -1053,6 +1122,8 @@ def _filament_stats() -> dict:
                             if b and b["grams"] else None),
             # the undiscounted price per kg this filament is costed at
             "list_per_kg": _ORDER_PRICES.get((a.get("filament_id") or "").upper()),
+            # what it is actually costed at, and whether that came from a person
+            "price_per_kg": meta.get("price_per_kg"),
             **a,
             "grams": round(a["grams"], 1),
             "cost": round(a["cost"], 4),
@@ -1234,13 +1305,20 @@ def _brand_price(is_bambu: bool, ftype: str | None) -> tuple:
     return None, None
 
 
-def _filament_price_per_kg(entry: dict, bambu_map: dict | None = None) -> tuple:
+def _filament_price_per_kg(entry: dict, bambu_map: dict | None = None,
+                           fkey: str | None = None) -> tuple:
     """(price per kg, which rule matched) - most specific rule first.
 
     Bambu vs third-party is decided by the AMS RFID tag recorded while the print
     ran, NOT by the cloud: the cloud only knows the slicer's filament profile, so
     a third-party spool printed with a Bambu profile still reports e.g. GFA00.
     """
+    # A price typed in for this exact filament wins outright. Everything below
+    # is inference - a brand x material guess, or an assumption that the SKU on
+    # an invoice is the spool that was in the tray - and inference should never
+    # overrule someone who went and looked at the receipt.
+    if fkey and fkey in _FIL_PRICES:
+        return _FIL_PRICES[fkey], "set by hand"
     slot = str((entry.get("slotId") if entry.get("slotId") is not None else -1) + 1)
     by_slot = (FIL_CFG.get("per_slot") or {}).get(slot)
     if by_slot is not None:
@@ -1252,14 +1330,27 @@ def _filament_price_per_kg(entry: dict, bambu_map: dict | None = None) -> tuple:
     # history - beats the hand-maintained brand x material guess below. Only for
     # spools the RFID tag confirms are genuine: a third-party spool sliced with a
     # Bambu profile reports a Bambu SKU and must not be priced as one.
-    if PRICES_FROM_ORDERS and bambu_map and bambu_map.get(slot):
-        sku = (entry.get("filamentId") or "").upper()
-        learned = _ORDER_PRICES.get(sku)
+    # Genuine or not, decided once. It comes from the RFID tag either way - from
+    # the IDENTITY's reading first, then from this print's own snapshot. A print
+    # whose filament was not recognised is precisely the one whose snapshot is
+    # unreliable, and an identity is what a person merged it into. Both rules
+    # below turn on this, and they must not disagree about the same spool.
+    ident_sku, ident_bambu = _FIL_ID.get(fkey or "", (None, None))
+    genuine = ident_bambu
+    if genuine is None:
+        genuine = bambu_map.get(slot) if bambu_map else None
+
+    if PRICES_FROM_ORDERS:
+        # Which SKU to price by: after a merge, the identity's own - two prints
+        # of the same spool that were recorded under different SKUs have to end
+        # up at the same price, which is the whole point of merging them.
+        sku = (ident_sku or entry.get("filamentId") or "").upper()
+        learned = _ORDER_PRICES.get(sku) if genuine else None
         if learned:
             return learned, f"order {sku}"
     # brand x material is more specific than material alone, so it comes first
-    if bambu_map and slot in bambu_map:
-        price, rule = _brand_price(bambu_map[slot], entry.get("filamentType"))
+    if genuine is not None:
+        price, rule = _brand_price(genuine, entry.get("filamentType"))
         if price is not None:
             return price, rule
     by_type = (FIL_CFG.get("per_type") or {}).get(entry.get("filamentType") or "")
@@ -1301,8 +1392,6 @@ def _apply_cloud_task(task: dict) -> bool:
     detail, fil_cost = [], 0.0
     for e in mapping:
         grams = float(e.get("weight") or 0)
-        per_kg, rule = _filament_price_per_kg(e, bambu_map)
-        fil_cost += grams / 1000.0 * per_kg
         slot = (e.get("slotId") or 0) + 1
         # The AMS snapshot exists to correct the SKU: the cloud reports the
         # slicer PROFILE, so one spool otherwise appears once per profile it was
@@ -1316,6 +1405,14 @@ def _apply_cloud_task(task: dict) -> bool:
             print(f"[cloud] slot {slot}: AMS had #{snap['color']}, job says "
                   f"#{cloud_color} - ignoring the snapshot for this line")
             snap = {}
+        # resolved BEFORE pricing: a price set by hand is per filament identity,
+        # so the identity has to exist before the price can be looked up
+        fkey = _canon_fkey(filament_catalog.key(
+            snap.get("sku") or e.get("filamentId"),
+            cloud_color or snap.get("color"),
+            e.get("filamentType") or snap.get("type")))
+        per_kg, rule = _filament_price_per_kg(e, bambu_map, fkey)
+        fil_cost += grams / 1000.0 * per_kg
         detail.append({
             "slot": slot,
             "type": e.get("filamentType") or snap.get("type"),
@@ -1493,15 +1590,8 @@ def index():
     dashboard.html silently undoes the copy - and the page then looks unchanged
     no matter how many times it is fixed. One local page load is cheap; a stale
     one costs an afternoon.
-
-    Two layouts are available and they differ in structure, not just styling, so
-    they are two documents: dashboard.html, and classic.html - the previous
-    eight-tab version, frozen. The ✦ button sets the cookie read here.
     """
-    page = "classic.html" if request.cookies.get("bambu_page") == "classic" else "dashboard.html"
-    if not os.path.exists(os.path.join(HERE, page)):
-        page = "dashboard.html"
-    resp = send_file(os.path.join(HERE, page))
+    resp = send_file(os.path.join(HERE, "dashboard.html"))
     resp.headers["Cache-Control"] = "no-store, must-revalidate"
     return resp
 
@@ -1743,7 +1833,121 @@ def api_filament_identity():
         row = next((f for f in store.all_filaments() if f["fkey"] == fkey), None)
         if row and row.get("code"):
             _learn_color(row["code"], fields["color_name"])
+    # the AMS tiles read these from the cache, so a rename has to reach it now
+    # rather than at the next restart
+    _rebuild_filament_meta()
     return jsonify({"ok": True, "fkey": fkey, **fields})
+
+
+def _recost_filament(fkey: str) -> int:
+    """Re-price every past print that used this filament, in place.
+
+    A price is only useful if it applies to what you already printed - the
+    figures on the Filament and History pages are stored per print, worked out
+    when the cloud enriched the job, so a new price that only affected future
+    prints would leave the totals disagreeing with the number just typed in.
+
+    Reconstructs the pricing input from the stored per-slot detail rather than
+    re-fetching the job: the fields the rules read - slot, SKU, material - are
+    all in there, and the cloud may no longer have the task at all.
+    """
+    try:
+        prints = store.all_prints()
+    except Exception as e:
+        print(f"[filament] could not re-cost {fkey}: {e}")
+        return 0
+    touched = 0
+    for row in prints:
+        try:
+            entries = json.loads(row.get("filament_detail") or "[]") or []
+        except (TypeError, ValueError):
+            continue
+        if not entries:
+            continue
+        try:
+            bambu_map = json.loads(row.get("ams_bambu") or "{}")
+        except (TypeError, ValueError):
+            bambu_map = {}
+        changed = False
+        for e in entries:
+            k = _canon_fkey(filament_catalog.key(e.get("filament_id"), e.get("color"),
+                                                 e.get("type")))
+            if k != fkey:
+                continue
+            per_kg, rule = _filament_price_per_kg(
+                {"slotId": (e.get("slot") or 1) - 1, "filamentId": e.get("filament_id"),
+                 "filamentType": e.get("type")}, bambu_map, fkey)
+            cost = round(float(e.get("grams") or 0) / 1000.0 * per_kg, 4)
+            # the rule too: two rules can arrive at the same figure, and a
+            # label describing a rule that no longer applies is worse than no
+            # label - it is what the print detail and the diagnostics explain
+            # the price with
+            if (e.get("per_kg") != per_kg or e.get("cost") != cost
+                    or e.get("rule") != rule):
+                e["per_kg"], e["rule"], e["cost"] = per_kg, rule, cost
+                changed = True
+        if not changed:
+            continue
+        total = round(sum(float(x.get("cost") or 0) for x in entries), 4)
+        try:
+            store.update_print_fields(row["job_id"],
+                                      filament_detail=json.dumps(entries),
+                                      filament_cost=total or None)
+            touched += 1
+        except Exception as e:
+            print(f"[filament] re-cost of {row['job_id']} failed: {e}")
+    return touched
+
+
+@app.route("/api/filaments/price", methods=["POST"])
+def api_filament_price():
+    """Set (or clear) the price per kg of one filament, and re-cost its history.
+
+    The configured brand x material matrix cannot know what a third-party spool
+    cost, and the invoice importer only covers spools whose SKU appears on a
+    Bambu invoice - which is exactly the filament this is for.
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    fkey = (data.get("fkey") or "").strip()
+    if not fkey:
+        return jsonify({"ok": False, "error": "missing fkey"}), 400
+    raw = data.get("price_per_kg")
+    if raw in (None, ""):
+        per_kg = None                      # hand it back to the configured rules
+    else:
+        per_kg = _num_or_none(raw, float)
+        if per_kg is None or per_kg < 0:
+            return jsonify({"ok": False, "error": "not a price"}), 400
+        if per_kg > 100000:
+            return jsonify({"ok": False, "error": "that is not a price per kg"}), 400
+        per_kg = round(per_kg, 4)
+    # The identity shape is checked before anything is created, so an API caller
+    # cannot mint junk rows: 'SKU|RRGGBB', or a bare material and '?' when the
+    # printer gave neither.
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,24}\|([0-9A-Fa-f]{6}|\?)", fkey):
+        return jsonify({"ok": False, "error": "not a filament identity"}), 400
+    try:
+        if not store.set_filament_price(fkey, per_kg):
+            # A filament used up before the AMS ever saw it exists only in the
+            # print history and has no row to hang a price on - which is exactly
+            # the third-party spool this feature is for. Create it from the key,
+            # the same way naming one does.
+            sku, _, hexc = fkey.partition("|")
+            store.upsert_filament(
+                fkey,
+                filament_id=sku if sku.upper().startswith("GF") else None,
+                type=None if sku.upper().startswith("GF") else sku,
+                color=filament_catalog.norm_color(hexc))
+            if not store.set_filament_price(fkey, per_kg):
+                return jsonify({"ok": False, "error": "no such filament"}), 404
+        _rebuild_filament_meta()
+        n = _recost_filament(_canon_fkey(fkey))
+    except Exception as e:
+        print(f"[filament] price update failed: {e}")
+        return jsonify({"ok": False, "error": str(e)[:300]}), 500
+    print(f"[filament] {fkey} -> {per_kg if per_kg is not None else '(config)'} /kg, "
+          f"{n} print(s) re-costed")
+    return jsonify({"ok": True, "fkey": fkey, "price_per_kg": per_kg, "recosted": n})
 
 
 @app.route("/api/filaments/delete", methods=["POST"])
@@ -1776,6 +1980,7 @@ def api_filament_delete():
     except Exception as e:
         print(f"[filament] delete failed: {e}")
         return jsonify({"ok": False, "error": str(e)[:300]}), 500
+    _rebuild_filament_meta()   # the name is gone from the AMS tiles too
     print(f"[filament] forgot identity {fkey}")
     return jsonify({"ok": ok, "fkey": fkey})
 
@@ -1814,8 +2019,17 @@ def api_filament_merge():
     except Exception as e:
         print(f"[filament] merge failed: {e}")
         return jsonify({"ok": False, "error": str(e)[:300]}), 500
-    print(f"[filament] {src} -> {dst or '(unmerged)'}")
-    return jsonify({"ok": True, "from": src, "into": dst or None})
+    _rebuild_filament_meta()   # canon changed: a price follows the merge
+    # Merging says "these are the same filament", so the prints recorded under
+    # the folded identity have to be costed as that filament - otherwise two
+    # halves of the same batch keep two different prices and the totals look
+    # wrong in exactly the way the merge was meant to fix. Both ends are
+    # re-costed, so undoing a merge puts the prices back too.
+    recosted = _recost_filament(_canon_fkey(src))
+    if dst:
+        recosted += _recost_filament(_canon_fkey(dst))
+    print(f"[filament] {src} -> {dst or '(unmerged)'}, {recosted} print(s) re-costed")
+    return jsonify({"ok": True, "from": src, "into": dst or None, "recosted": recosted})
 
 
 @app.route("/api/purchases", methods=["POST"])

@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bambu X2D Monitor</title>
-<!-- inline SVG favicon: white printer glyph on the brand's indigo gradient (no external asset) -->
-<link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4MT0iMCIgeTE9IjAiIHgyPSIxIiB5Mj0iMSI+PHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjNjM2NmYxIi8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjODE4Y2Y4Ii8+PC9saW5lYXJHcmFkaWVudD48L2RlZnM+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iOCIgZmlsbD0idXJsKCNnKSIvPjxyZWN0IHg9IjEwLjUiIHk9IjUuNSIgd2lkdGg9IjExIiBoZWlnaHQ9IjYuNSIgcng9IjEuNSIgZmlsbD0iI2ZmZiIvPjxyZWN0IHg9IjYiIHk9IjExIiB3aWR0aD0iMjAiIGhlaWdodD0iOC41IiByeD0iMi41IiBmaWxsPSIjZmZmIi8+PGNpcmNsZSBjeD0iMjEuNSIgY3k9IjE1IiByPSIxLjUiIGZpbGw9IiM2MzY2ZjEiLz48cmVjdCB4PSI5LjUiIHk9IjE3IiB3aWR0aD0iMTMiIGhlaWdodD0iOSIgcng9IjEuNSIgZmlsbD0iI2ZmZiIvPjxyZWN0IHg9IjEyIiB5PSIyMC40IiB3aWR0aD0iOCIgaGVpZ2h0PSIxLjUiIHJ4PSIuNzUiIGZpbGw9IiM4MThjZjgiLz48cmVjdCB4PSIxMiIgeT0iMjMiIHdpZHRoPSI1LjUiIGhlaWdodD0iMS41IiByeD0iLjc1IiBmaWxsPSIjODE4Y2Y4Ii8+PC9zdmc+">
+<!-- inline SVG favicon: cyan printer glyph on Proton grey (no external asset) -->
+<link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iOCIgZmlsbD0iIzJCMkEzMyIvPjxyZWN0IHg9IjEwLjUiIHk9IjUuNSIgd2lkdGg9IjExIiBoZWlnaHQ9IjYuNSIgcng9IjEuNSIgZmlsbD0iIzQ1QTFGRiIvPjxyZWN0IHg9IjYiIHk9IjExIiB3aWR0aD0iMjAiIGhlaWdodD0iOC41IiByeD0iMi41IiBmaWxsPSIjNDVBMUZGIi8+PGNpcmNsZSBjeD0iMjEuNSIgY3k9IjE1IiByPSIxLjUiIGZpbGw9IiMyQjJBMzMiLz48cmVjdCB4PSI5LjUiIHk9IjE3IiB3aWR0aD0iMTMiIGhlaWdodD0iOSIgcng9IjEuNSIgZmlsbD0iIzQ1QTFGRiIvPjxyZWN0IHg9IjEyIiB5PSIyMC40IiB3aWR0aD0iOCIgaGVpZ2h0PSIxLjUiIHJ4PSIuNzUiIGZpbGw9IiMyQjJBMzMiLz48cmVjdCB4PSIxMiIgeT0iMjMiIHdpZHRoPSI1LjUiIGhlaWdodD0iMS41IiByeD0iLjc1IiBmaWxsPSIjMkIyQTMzIi8+PC9zdmc+">
 <style>
   /* ---------- design tokens ---------- */
   :root{
@@ -49,28 +49,47 @@
      extra weight and must not be reduced to a plain `:root`.
      ============================================================ */
   :root:root{
-    --bg:#f7f9fb; --bg-2:#eef2f6;
-    --surface:#ffffff; --surface-2:#f4f7fa;
-    --border:#e3e9ef; --border-strong:#cbd5e1;
-    --track:#e8edf2;
-    --text:#0f172a; --text-2:#475569; --text-3:#7c8b9d;
-    --accent:#2563eb; --accent-2:#3b82f6; --accent-soft:rgba(37,99,235,.10);
-    --good:#047857; --warn:#b45309; --danger:#be123c; --info:#1d4ed8;
-    --shadow:none; --shadow-lg:0 12px 36px rgba(15,23,42,.14);
-    --s-noz0:#1d4ed8; --s-noz1:#047857; --s-bed:#b45309; --s-chamber:#3f6212;
-    --s-power:#be123c;
+    /* Firefox Proton. Not a two-colour pair like the earlier schemes but a
+       neutral grey scale with one accent, which is why it needs no colour
+       demoted to a tint: the accent is a mid-tone in both themes and reads as
+       text on its own ground. Light uses Firefox's primary blue, dark its cyan.
+       Greys: #15141A #2B2A33 #42414D #5B5B66 #8F8F9D #CFCFD8 #F0F0F4 #FBFBFE */
+    --bg:#f9f9fb; --bg-2:#f0f0f4;
+    --surface:#ffffff; --surface-2:#f9f9fb;
+    --border:#cfcfd8; --border-strong:#8f8f9d;
+    --track:#e0e0e6;
+    --text:#15141a; --text-2:#5b5b66; --text-3:#8f8f9d;
+    --accent:#0060df; --accent-2:#0250bb; --accent-soft:rgba(0,96,223,.10);
+    /* readable foreground on an --accent fill */
+    --accent-ink:#ffffff;
+    /* the primary fill, as Firefox draws its default button */
+    --brand:#0060df; --brand-ink:#ffffff;
+    --on-status:#ffffff;   /* status fills are dark here */
+    --good-soft:rgba(2,121,72,.12); --warn-soft:rgba(140,79,0,.12);
+    --danger-soft:rgba(197,17,66,.12);
+    --good:#027948; --warn:#8c4f00; --danger:#c51142; --info:#0060df;
+    --shadow:none; --shadow-lg:0 12px 36px rgba(21,20,26,.16);
+    --s-noz0:#0060df; --s-noz1:#027948; --s-bed:#8c4f00; --s-chamber:#5b6b1c;
+    --s-power:#c51142;
   }
   :root:root[data-theme="dark"]{
-    --bg:#0a0e14; --bg-2:#0f151d;
-    --surface:#111823; --surface-2:#16202c;
-    --border:#1e2a38; --border-strong:#31445a;
-    --track:#1c2836;
-    --text:#e8eef6; --text-2:#9bacc0; --text-3:#647588;
-    --accent:#38bdf8; --accent-2:#7dd3fc; --accent-soft:rgba(56,189,248,.14);
-    --good:#34d399; --warn:#fbbf24; --danger:#fb7185; --info:#60a5fa;
-    --shadow:none; --shadow-lg:0 16px 44px rgba(0,0,0,.65);
-    --s-noz0:#60a5fa; --s-noz1:#34d399; --s-bed:#fbbf24; --s-chamber:#a3e635;
-    --s-power:#fb7185;
+    /* the one that was actually asked for: in-content #1C1B22, cards #2B2A33,
+       raised #42414D, text #FBFBFE, accent #00DDFF with dark ink on it */
+    --bg:#1c1b22; --bg-2:#18171e;
+    --surface:#2b2a33; --surface-2:#35343d;
+    --border:#52515c; --border-strong:#8f8f9d;
+    --track:#42414d;
+    --text:#fbfbfe; --text-2:#cfcfd8; --text-3:#8f8f9d;
+    --accent:#45a1ff; --accent-2:#80b4ff; --accent-soft:rgba(69,161,255,.14);
+    --accent-ink:#2b2a33;
+    --brand:#45a1ff; --brand-ink:#2b2a33;
+    --on-status:#1c1b22;   /* ...and light here */
+    --good-soft:rgba(84,255,189,.16); --warn-soft:rgba(255,189,79,.16);
+    --danger-soft:rgba(255,154,162,.16);
+    --good:#54ffbd; --warn:#ffbd4f; --danger:#ff9aa2; --info:#80b4ff;
+    --shadow:none; --shadow-lg:0 16px 44px rgba(0,0,0,.7);
+    --s-noz0:#45a1ff; --s-noz1:#54ffbd; --s-bed:#ffbd4f; --s-chamber:#b8d96a;
+    --s-power:#ff9aa2;
   }
   html:root body::before{background:none}
   html:root body{font-size:15.5px; line-height:1.55}
@@ -171,7 +190,7 @@
     padding:7px 16px; cursor:pointer;
     transition:.15s; white-space:nowrap}
   .tabs button:hover{color:var(--text); border-color:var(--border-strong)}
-  .tabs button.on{background:var(--accent); color:#fff; border-color:transparent;
+  .tabs button.on{background:var(--surface); color:var(--text); border-color:var(--border-strong);
     box-shadow:var(--shadow)}
   /* Two classes, so these beat the single-class `.dash{display:grid}` rule
      below regardless of declaration order. */
@@ -183,13 +202,14 @@
      sections are a segmented control in the masthead, the views inside the
      current section are underlined text on a rule below it. */
   .sections{display:flex; gap:2px; flex-wrap:wrap; margin-left:24px;
-    padding:4px; background:var(--surface-2);
+    padding:4px; background:var(--bg-2);
     border:1px solid var(--border); border-radius:12px}
   .sections button{font:inherit; font-size:13.5px; font-weight:650; color:var(--text-2);
     background:none; border:0; border-radius:9px; padding:8px 16px;
     cursor:pointer; transition:.15s; white-space:nowrap}
   .sections button:hover{color:var(--text); background:var(--surface)}
-  .sections button.on{color:#fff; background:var(--accent)}
+  .sections button.on{color:var(--text); background:var(--surface);
+    box-shadow:0 1px 2px rgba(0,0,0,.10)}
   .subnav{display:flex; align-items:center; gap:2px; flex-wrap:wrap;
     margin:18px 0 20px; border-bottom:1px solid var(--border)}
   .subnav button{font:inherit; font-size:13px; font-weight:600; color:var(--text-3);
@@ -318,8 +338,13 @@
   .brand{display:flex; align-items:center; gap:13px}
   .logo{
     width:44px; height:44px; border-radius:13px; display:grid; place-items:center;
-    background:linear-gradient(145deg,var(--accent),var(--accent-2));
-    box-shadow:var(--shadow); color:#fff; font-size:22px;
+    /* neutral: an app mark is not an action, and the accent is reserved for
+       things you can do. Matches the icon buttons on the other side of the
+       masthead, which is what it sits in a row with. */
+    /* --surface, not --surface-2: in light those two are the same value as
+       the page ground, which left the tile as an empty outline */
+    background:var(--surface); border:1px solid var(--border);
+    box-shadow:var(--shadow); color:var(--brand-ink); font-size:22px;
   }
   .brand h1{font-size:19px; margin:0; font-weight:650; letter-spacing:-.02em}
   .brand .sub{font-size:12.5px; color:var(--text-3); margin-top:1px}
@@ -370,7 +395,10 @@
   }
   .icon-btn:hover{color:var(--text); border-color:var(--border-strong)}
   .icon-btn:disabled{opacity:.4; cursor:default}
-  .icon-btn.led-on{color:#f5b301; border-color:#f5b301; background:rgba(245,179,1,.14)}
+  /* the lamp is either on or it is not, so it reads as a filled button
+     rather than a tint - a pale brand colour would say nothing on white */
+  .icon-btn.led-on{color:var(--accent-ink); background:var(--accent);
+    border-color:var(--accent)}
 
   /* ---------- cards ---------- */
   .card{
@@ -400,7 +428,8 @@
     text-transform:uppercase; letter-spacing:.06em}
   .hero-info{flex:1; min-width:230px}
   .statepill{display:inline-flex; align-items:center; gap:7px; font-size:12.5px; font-weight:600;
-    padding:5px 13px; border-radius:999px; color:#fff; letter-spacing:.01em}
+    padding:4px 12px; border-radius:999px; letter-spacing:.01em;
+    background:var(--surface-2); border:1px solid currentColor}
   .job-name{font-size:22px; font-weight:640; letter-spacing:-.02em; margin:12px 0 2px;
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
   .mw-link{display:inline-flex; align-items:center; gap:4px; font-size:12.5px; font-weight:600;
@@ -474,7 +503,12 @@
   .spools{display:grid; gap:14px; grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
   .spool{display:flex; gap:13px; align-items:center; padding:13px; border-radius:14px;
     border:1px solid var(--border); background:var(--surface-2); transition:.2s}
-  .spool.active{border-color:var(--accent); box-shadow:0 0 0 1px var(--accent), var(--shadow)}
+  /* the loaded slot. The background here was the same value as the base tile,
+     so the only cue was a one-pixel border shade. A tint plus a marker edge -
+     the pattern the warning rows already use - says it without going back to
+     a block of accent. Inset, not a border, so the tile does not shift. */
+  .spool.active{border-color:var(--border-strong); background:var(--accent-soft);
+    box-shadow:inset 3px 0 0 var(--accent)}
   .donut{--pct:0; --fc:var(--text-3); width:52px; height:52px; border-radius:50%; flex:none; position:relative;
     background:conic-gradient(var(--fc) calc(var(--pct)*3.6deg), var(--track) 0)}
   .donut-hole{position:absolute; inset:6px; border-radius:50%; background:var(--surface); display:grid;
@@ -485,7 +519,7 @@
     padding:0 4px; border-radius:5px; background:var(--surface); border:1px solid var(--border-strong);
     color:var(--text-2); font-size:10px; font-weight:700; letter-spacing:.03em;
     margin-right:7px; vertical-align:2px}
-  .spool.active .slot-badge{background:var(--accent); border-color:transparent; color:#fff}
+  .spool.active .slot-badge{background:var(--text); border-color:transparent; color:var(--surface)}
   .spool-type{font-weight:640; font-size:14px}
   .spool-brand{font-size:11.5px; color:var(--text-3); margin-top:1px}
   .spool-left{font-size:11.5px; color:var(--text-2); margin-top:3px; font-variant-numeric:tabular-nums}
@@ -493,8 +527,8 @@
     text-transform:uppercase; color:var(--accent); background:var(--accent-soft); padding:2px 7px; border-radius:5px}
   /* nearly-used spool: flag it and offer the reorder link right there */
   .spool.low{border-color:var(--warn)}
-  .tag-low{color:var(--warn); background:rgba(217,119,6,.14)}
-  .tag-new{color:var(--good); background:rgba(16,185,129,.14)}
+  .tag-low{color:var(--warn); background:var(--warn-soft)}
+  .tag-new{color:var(--good); background:var(--good-soft)}
   .spool-tags{display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:6px}
   .spool-tags:empty{display:none}
   .reorder{font-size:11px; font-weight:650; color:var(--accent); text-decoration:none; white-space:nowrap}
@@ -534,7 +568,7 @@
     border:1px solid var(--border-strong); background:var(--surface); color:var(--text-2); white-space:nowrap; transition:.15s}
   .wbtn:hover{color:var(--text); border-color:var(--accent)}
   .wbtn.ack-btn{background:var(--accent-soft); border-color:transparent; color:var(--accent)}
-  .wbtn.ack-btn:hover{background:var(--accent); color:#fff}
+  .wbtn.ack-btn:hover{background:var(--accent); color:var(--accent-ink)}
   .warn.is-acked{border-left-color:var(--good); opacity:.6}
   .warn.is-acked .ic{color:var(--good)}
   .all-clear{font-size:13px; color:var(--text-3); padding:4px 2px; font-weight:500}
@@ -546,7 +580,7 @@
   .stage{margin-top:14px; font-size:12.5px; color:var(--text-2); display:none;
     background:var(--surface-2); border-radius:9px; padding:7px 11px; font-weight:500}
   .stage b{color:var(--text); font-weight:640}
-  .errbar{margin-top:10px; font-size:12.5px; font-weight:600; color:#fff; background:var(--danger);
+  .errbar{margin-top:10px; font-size:12.5px; font-weight:600; color:var(--on-status); background:var(--danger);
     border-radius:9px; padding:8px 12px}
 
   /* print controls in the hero tile (only shown while a job is active) */
@@ -556,10 +590,10 @@
     box-shadow:var(--shadow); transition:.15s; white-space:nowrap}
   .ctrl-btn:hover{border-color:var(--border-strong)}
   .ctrl-btn.danger{color:var(--danger); border-color:var(--danger)}
-  .ctrl-btn.danger:hover{background:var(--danger); color:#fff}
+  .ctrl-btn.danger:hover{background:var(--danger); color:var(--on-status)}
   .ctrl-speed{display:flex; align-items:center; gap:8px}
   .ctrl-lbl{font-size:11px; color:var(--text-3); text-transform:uppercase; letter-spacing:.06em; font-weight:600}
-  #speedSeg button.on{background:var(--accent); color:#fff}
+  #speedSeg button.on{background:var(--accent); color:var(--accent-ink)}
   .fanrange{flex:1; min-width:90px; accent-color:var(--accent); cursor:pointer; height:8px}
   /* small "set target" affordance on the bed/chamber temp tiles */
   .temp-set{position:absolute; top:9px; right:9px; font:inherit; font-size:10.5px; font-weight:600;
@@ -605,7 +639,7 @@
     font-size:14px; line-height:1; padding:4px 7px; border-radius:6px; opacity:0;
     transition:opacity .15s ease, color .15s ease, background .15s ease}
   .htab tr:hover .del-btn, .htab .del-btn:focus-visible{opacity:1}
-  .htab .del-btn:hover{color:var(--danger); background:rgba(239,68,68,.12)}
+  .htab .del-btn:hover{color:var(--danger); background:var(--danger-soft)}
   @media(hover:none){ .htab .del-btn{opacity:.6} }
   #histHead{flex-wrap:wrap; row-gap:8px; align-items:center}
   /* labelled break between the two blocks in "Groups first" */
@@ -638,7 +672,7 @@
   .gbtn:hover{color:var(--accent); background:var(--surface)}
   /* the deleted row slides away before the table reloads, so the change is seen */
   .htab tr.gone{opacity:0; transform:translateX(18px); transition:opacity .22s ease, transform .22s ease}
-  .htab tr.gone td{background:rgba(239,68,68,.10)}
+  .htab tr.gone td{background:var(--danger-soft)}
 
   /* toast */
   .toast{position:fixed; left:50%; bottom:26px; z-index:60; transform:translate(-50%,14px);
@@ -649,14 +683,17 @@
     transition:opacity .2s ease, transform .2s ease}
   .toast.show{opacity:1; transform:translate(-50%,0)}
   .toast::before{content:"✓"; font-size:12px; font-weight:800; flex:none; width:18px; height:18px;
-    border-radius:50%; display:grid; place-items:center; color:#fff; background:var(--good)}
+    border-radius:50%; display:grid; place-items:center; color:var(--on-status); background:var(--good)}
   .toast.bad::before{content:"!"; background:var(--danger)}
   @media(prefers-reduced-motion:reduce){
     .toast, .htab tr.gone{transition-duration:.01ms}
   }
 
   /* ---------- filament page ---------- */
-  .htab .fname{display:flex; align-items:center; gap:10px; max-width:300px}
+  /* the cap belongs on the TEXT, not on the cell: capping the cell pinned the
+     whole column at 300px as soon as one row reached it, so every shorter row
+     showed a stretch of empty space before the next column */
+  .htab .fname{display:flex; align-items:center; gap:10px}
   .htab .ven{white-space:nowrap; color:var(--text-2)}
   .htab .edit{cursor:text}
   .htab .edit:hover{text-decoration:underline dotted var(--text-3); text-underline-offset:3px}
@@ -666,7 +703,7 @@
   /* ring, not a filled dot: white filament has to stay visible on a light card */
   .swatch{flex:none; width:20px; height:20px; border-radius:50%; background:var(--sw,#888);
     box-shadow:inset 0 0 0 1px rgba(127,127,127,.45)}
-  .fname .fn-txt{display:flex; flex-direction:column; min-width:0}
+  .fname .fn-txt{display:flex; flex-direction:column; min-width:0; max-width:270px}
   .fname .fn-txt b{font-weight:640; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
   .fname .fn-sub{font-size:11.5px; color:var(--text-3); overflow:hidden;
     text-overflow:ellipsis; white-space:nowrap}
@@ -705,7 +742,7 @@
     color:var(--text-3); font-weight:650}
   .draft-x{border:0; background:none; cursor:pointer; color:var(--text-3); font-size:14px;
     padding:4px; border-radius:6px}
-  .draft-x:hover{color:var(--danger); background:rgba(239,68,68,.12)}
+  .draft-x:hover{color:var(--danger); background:var(--danger-soft)}
   @media(max-width:760px){ .draft-row{grid-template-columns:1fr 1fr 1fr; } .draft-head{display:none} }
   /* product-line group header inside the purchases table */
   .htab tr.grp td{padding:9px 12px; background:var(--surface-2); cursor:pointer;
@@ -736,7 +773,7 @@
   @media(hover:none){ .row-acts .del-btn{opacity:.6} }
 
   /* suggested duplicate identities */
-  .dupes{border:1px solid var(--warn); background:rgba(217,119,6,.08);
+  .dupes{border:1px solid var(--warn); background:var(--warn-soft);
     border-radius:12px; padding:11px 13px; margin-bottom:14px}
   .dupes h4{margin:0 0 4px; font-size:12px; font-weight:700; letter-spacing:.05em;
     text-transform:uppercase; color:var(--warn)}
@@ -749,6 +786,16 @@
   .htab .shr{width:110px}
   .htab .shr .mt{display:block; height:7px; border-radius:4px; background:var(--surface-2); overflow:hidden}
   .htab .shr .mt>span{display:block; height:100%; background:var(--accent); border-radius:4px}
+
+  /* the colour code, as something you can take with you: for a spool with no
+     RFID this is what has to be typed into the printer to match the identity
+     the app already knows */
+  .hexchip{font:inherit; font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    font-size:11px; letter-spacing:.02em; cursor:pointer; padding:1px 6px;
+    margin-left:2px; border-radius:6px; border:1px solid var(--border-strong);
+    background:var(--surface-2); color:var(--text-2); vertical-align:1px}
+  .hexchip:hover{border-color:var(--accent); color:var(--accent)}
+  .hexchip:active{background:var(--accent-soft)}
 
   /* ---------- notes ---------- */
   .note-new{display:flex; flex-direction:column; gap:9px; margin-bottom:16px}
@@ -765,7 +812,7 @@
     background:var(--surface); border:1px solid var(--border); border-radius:999px;
     padding:5px 12px; cursor:pointer; transition:.15s}
   .note-cats button:hover{border-color:var(--border-strong); color:var(--text)}
-  .note-cats button.on{background:var(--accent); color:#fff; border-color:transparent;
+  .note-cats button.on{background:var(--accent); color:var(--accent-ink); border-color:transparent;
     box-shadow:var(--shadow)}
   .note-cats .cnt{opacity:.6; margin-left:6px; font-variant-numeric:tabular-nums}
   .note-cat{font-size:10px; font-weight:700; letter-spacing:.05em; text-transform:uppercase;
@@ -849,9 +896,9 @@
     border-radius:7px; border:1px solid var(--accent); background:var(--surface);
     color:var(--text); outline:none}
   .pill-state{font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:5px; white-space:nowrap}
-  .st-ok{background:rgba(16,185,129,.15); color:var(--good)}
+  .st-ok{background:var(--good-soft); color:var(--good)}
   .st-run{background:var(--accent-soft); color:var(--accent)}
-  .st-bad{background:rgba(239,68,68,.15); color:var(--danger)}
+  .st-bad{background:var(--danger-soft); color:var(--danger)}
   .st-idle{background:var(--track); color:var(--text-3)}
   .err-sub{font-size:10.5px; color:var(--danger); margin-top:3px; font-family:ui-monospace,monospace}
   .err-clr{cursor:pointer}
@@ -861,12 +908,12 @@
     border:1px solid var(--border); border-radius:11px; padding:13px; font-size:11.5px;
     line-height:1.5; font-family:ui-monospace,"SF Mono",Menlo,monospace; color:var(--text-2);
     white-space:pre; tab-size:2}
-  #rawBox .rk-on{color:#3fb950; font-weight:600}   /* key the app consumes */
+  #rawBox .rk-on{color:var(--good); font-weight:600}   /* key the app consumes */
   #rawBox .rk-off{color:var(--text)}               /* key not yet used */
   #rawBox .rv{color:var(--text-3)}                 /* values, dimmed */
   .raw-legend{display:flex; gap:16px; align-items:center; margin-left:auto; font-size:11px; color:var(--text-2)}
   .raw-legend .sw{display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:5px; vertical-align:middle}
-  .raw-legend .sw-on{background:#3fb950}
+  .raw-legend .sw-on{background:var(--good)}
   .raw-legend .sw-off{background:var(--text)}
 
   /* cost card */
@@ -955,7 +1002,6 @@
       <button class="icon-btn" id="ledBtn" title="Chamber light" disabled>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"/></svg>
       </button>
-      <button class="icon-btn" id="designBtn" title="Switch design">✦</button>
       <button class="icon-btn" id="themeBtn" title="Toggle theme">◐</button>
     </div>
   </header>
@@ -1197,7 +1243,7 @@
         <span id="dayFilterTxt"></span>
         <button class="wbtn" id="dayFilterClear" data-i18n="Show all prints">Show all prints</button>
       </div>
-      <div class="selbar" id="histSelBar"
+      <div class="selbar" id="histSelBar">
         <span id="histSelCount"></span>
         <button class="wbtn" id="histGroupBtn" data-i18n="Group…">Group…</button>
         <button class="wbtn" id="histUngroupBtn" data-i18n="Ungroup">Ungroup</button>
@@ -1258,6 +1304,13 @@
           <button data-s="ams" data-i18n="In AMS">In AMS</button>
           <button data-s="low" data-i18n="Low">Low</button>
           <button data-s="unused" data-i18n="unused">unused</button>
+        </span>
+        <!-- which form the colour chips are shown and copied in. The Windows
+             colour dialog has R/G/B boxes and no hex field, so which one is
+             useful depends entirely on where you are typing it. -->
+        <span class="seg" id="filColSeg" data-i18n-title="colour format" title="colour format">
+          <button data-c="hex">HEX</button>
+          <button data-c="rgb">RGB</button>
         </span>
       </div>
       <div id="filDupes"></div>
@@ -1645,7 +1698,6 @@ const DE = {
   // navigation: four sections and the views inside them
   "Printer":"Drucker", "Prints":"Drucke", "Workshop":"Werkstatt",
   "Hardware":"Hardware", "Raw data":"Rohdaten", "Inventory":"Bestand",
-  "Switch layout":"Layout wechseln",
   // Now, when nothing is printing
   "Ready":"Bereit", "printer offline":"Drucker offline", "spools loaded":"Spulen geladen",
   "nozzle":"Düse", "Last print":"Letzter Druck", "Finished":"Fertig", "Took":"Dauer",
@@ -1659,6 +1711,24 @@ const DE = {
   // chart -> table drill-down
   "Showing":"Zeige", "Show all prints":"Alle Drucke zeigen",
   "+ Add an order":"+ Bestellung hinzufügen", "− Hide the importer":"− Import ausblenden",
+  "copy this colour code":"Farbcode kopieren", "copied":"kopiert",
+  "€/kg":"€/kg", "That is not a price.":"Das ist kein Preis.",
+  "Could not save the price.":"Preis konnte nicht gespeichert werden.",
+  "Price saved":"Preis gespeichert", "Price cleared":"Preis entfernt",
+  "the server does not know this route — copy app.py over and restart it":
+    "Der Server kennt diese Route nicht – app.py kopieren und neu starten",
+  "no answer from the server":"keine Antwort vom Server",
+  "prints re-costed":"Drucke neu berechnet",
+  "set by hand — click to change, empty to use the configured price":
+    "manuell gesetzt – klicken zum Ändern, leer für den konfigurierten Preis",
+  "from your invoices":"aus deinen Rechnungen",
+  "from the configured brand × material price":
+    "aus dem konfigurierten Marken-/Material-Preis",
+  "click to set it by hand":"klicken, um ihn selbst zu setzen",
+  "e.g. 18.99":"z. B. 18,99",
+  "Red":"Rot", "Green":"Grün", "Blue":"Blau", "colour format":"Farbformat",
+  "Could not copy — the code is":"Kopieren nicht möglich — der Code ist",
+  "Copy this colour:":"Diese Farbe kopieren:",
   "Timeline":"Zeitachse", "Groups first":"Gruppen zuerst",
   "Only groups":"Nur Gruppen", "Only singles":"Nur Einzelne",
   "Single prints":"Einzelne Drucke",
@@ -1753,16 +1823,6 @@ $("themeBtn").addEventListener("click", ()=>{
   redrawForPalette();
 });
 
-/* Layout switch. The two layouts differ in their page structure, not just their
-   styling, so they are two documents rather than one document with a CSS layer:
-   this page, and classic.html - the previous eight-tab version, kept frozen. The
-   server reads the cookie and serves whichever was chosen last. */
-const OTHER_PAGE = "classic";
-$("designBtn").addEventListener("click", ()=>{
-  document.cookie = `bambu_page=${OTHER_PAGE};path=/;max-age=31536000;samesite=lax`;
-  location.reload();
-});
-
 // the charts read their colours from CSS variables at draw time, so any palette
 // change needs them redrawn - including the day chart when it is on screen
 function redrawForPalette(){
@@ -1792,8 +1852,9 @@ const STATE_TOKEN = {
    clears the moment the tab is looked at. */
 const BASE_TITLE = document.title;
 const FAV_DEFAULT = document.querySelector('link[rel="icon"]').href;
-const FAV_COLOR = {Printing:"#4f8ef7", Paused:"#f59e0b", Finished:"#22c55e",
-                   Failed:"#ef4444", Preparing:"#60a5fa", Slicing:"#60a5fa"};
+// drawn on Big Stone, so these are the light end of the palette
+const FAV_COLOR = {Printing:"#45a1ff", Paused:"#ffbd4f", Finished:"#54ffbd",
+                   Failed:"#ff9aa2", Preparing:"#80b4ff", Slicing:"#80b4ff"};
 const DONE_STATES = ["Finished", "Failed"];
 const favCanvas = document.createElement("canvas");
 favCanvas.width = favCanvas.height = 32;
@@ -1805,7 +1866,7 @@ function drawFavicon(state, pct){
   // a dark disc under everything, so the mark reads on a light *and* a dark tab
   // strip without knowing which one the browser is using
   g.beginPath(); g.arc(16, 16, 15.5, 0, Math.PI*2);
-  g.fillStyle = "#12141a"; g.fill();
+  g.fillStyle = "#2b2a33"; g.fill();   // Proton grey, in both themes
   g.beginPath(); g.arc(16, 16, 11, 0, Math.PI*2);
   g.lineWidth = 6; g.strokeStyle = "rgba(255,255,255,.20)"; g.stroke();
   if(state === "Printing" || state === "Paused" || state === "Preparing"){
@@ -2020,7 +2081,7 @@ function render(s){
   $("ringState").textContent = t(j.state_label || "");
   const pill=$("statePill");
   pill.textContent = t(j.state_label || "—");
-  pill.style.background = col;
+  pill.style.color = col;
   // match the history's naming: your saved label wins, then the cloud title, then raw name
   $("jobName").textContent = j.label || j.design_title || j.name || t("No active job");
   // MakerWorld link — only when the job carries a design_id (i.e. it came from
@@ -2244,7 +2305,12 @@ function render(s){
                    .filter(Boolean).join(" · ");
       // identity line: product line + the colour's name, falling back to its
       // raw code when the catalogue doesn't know it (never a guessed name)
-      const ident = [tr.brand, tr.color_name || (tr.is_bambu ? tr.code : null)]
+      // What it is called. `brand` is the AMS's own product line; vendor and
+      // product come from the Filament page, and for a spool with no RFID they
+      // are the only name it will ever have - "no RFID data" is true but
+      // useless once you have told the app what the spool is.
+      const ident = [tr.vendor, tr.product || tr.brand,
+                     tr.color_name || (tr.is_bambu ? tr.code : null)]
                     .filter(Boolean).map(esc).join(" · ");
       // only genuine RFID spools get a store link - a third-party spool reports
       // a Bambu SKU whenever it was sliced with a Bambu profile
@@ -3350,6 +3416,10 @@ $("spools").addEventListener("click", e=>{
    server nor the page is refetched to reorder a table. */
 let filPayload = null, filSearch = "";
 let filScope = localStorage.getItem("bambu-filscope") || "all";
+// hex or the three channels: the copy chip shows, and copies, whichever form
+// you actually have to type somewhere. Windows' colour dialog has R/G/B boxes
+// and no hex field, so which one is useful depends on where it is going.
+let filColFmt = localStorage.getItem("bambu-colfmt") === "rgb" ? "rgb" : "hex";
 let filSort = {key: "grams", dir: -1};      // matches what the API sorts by
 try{ filSort = JSON.parse(localStorage.getItem("bambu-filsort")) || filSort; }catch(_){}
 
@@ -3360,6 +3430,9 @@ const FIL_KEYS = {
   grams:     f=> f.grams,
   bought_g:  f=> f.bought_g,
   left_g:    f=> f.left_g,
+  // whatever the row is actually costed at, hand-set or inherited, so the
+  // column sorts by what it displays
+  price_per_kg: f=> f.price_per_kg != null ? f.price_per_kg : f.list_per_kg,
   cost:      f=> f.cost,
   prints:    f=> f.prints,
   last_used: f=> f.last_used,
@@ -3386,6 +3459,12 @@ $("filSearch").addEventListener("input", e=>{
   filSearch = e.target.value.trim().toLowerCase();
   renderFilTable();
 });
+$("filColSeg").addEventListener("click", e=>{
+  if(e.target.tagName !== "BUTTON") return;
+  filColFmt = e.target.dataset.c;
+  localStorage.setItem("bambu-colfmt", filColFmt);
+  renderFilTable();
+});
 $("filScopeSeg").addEventListener("click", e=>{
   if(e.target.tagName !== "BUTTON") return;
   filScope = e.target.dataset.s;
@@ -3406,10 +3485,46 @@ $("filTable").addEventListener("click", e=>{
 
 // Name a filament as precisely as the data allows: product line + colour name
 // for an RFID spool, down to bare material + hex for one the AMS never saw.
+/* Copy a short string, on a NAS served over plain http://.
+   navigator.clipboard needs a SECURE CONTEXT, which http://nas:8770 is not, so
+   the async API is simply absent there. execCommand("copy") is deprecated but
+   has no such requirement and is what actually works on the box this runs on.
+   If both are refused the value is put in a prompt, which can always be
+   selected by hand - never leave the user with nothing to copy. */
+async function copyText(str){
+  try{
+    if(window.isSecureContext && navigator.clipboard){
+      await navigator.clipboard.writeText(str);
+      return true;
+    }
+  }catch(_){}
+  const ta = document.createElement("textarea");
+  ta.value = str;
+  ta.setAttribute("readonly", "");
+  ta.style.cssText = "position:fixed;top:-1000px;left:0;opacity:0";
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try{ ok = document.execCommand("copy"); }catch(_){}
+  ta.remove();
+  if(!ok) prompt(t("Copy this colour:"), str);
+  return ok;
+}
+
 function filName(f){
   const main = f.product || f.type || "—";
   const sub  = f.color_name || f.code || ("#" + (f.color || "??????"));
-  return {main: esc(main), sub: esc(sub)};
+  // The colour is the identity, and for a spool with no RFID it is also what
+  // has to be typed in by hand to match what was used last time - so it is
+  // shown even when a colour NAME already covers the sub-line.
+  const hex = f.color ? "#" + String(f.color).toUpperCase() : null;
+  const rgb = hex ? [1,3,5].map(i => parseInt(hex.substr(i,2),16)) : null;
+  const shown = !hex ? null : (filColFmt === "rgb" ? rgb.join(", ") : hex);
+  return {main: esc(main), sub: esc(sub), hex, rgb, shown,
+          // don't print the same string twice when the row has no colour name
+          dup: !!(shown && sub.toUpperCase() === shown.toUpperCase()),
+          spelt: rgb ? `${t("Red")} ${rgb[0]} · ${t("Green")} ${rgb[1]} · ${t("Blue")} ${rgb[2]}`
+                     : ""};
 }
 function filStatus(f){
   if(!f.loaded) return `<span style="color:var(--text-3)">—</span>`;
@@ -3424,6 +3539,41 @@ function filStatus(f){
    in the data can do better - the printer reports a borrowed Bambu profile and
    a colour, never a manufacturer. Naming it here is also what lets purchases
    find it, wording being the only route without a colour code. */
+/* Set or clear the price of one filament. An empty box is not zero - it hands
+   the filament back to the configured brand x material price, which is the only
+   way to undo a number typed in by mistake. */
+async function savePrice(fkey, raw){
+  const txt = String(raw || "").replace(",", ".").trim();
+  if(txt && !(parseFloat(txt) >= 0)){ toast(t("That is not a price."), true); return false; }
+  // A failure has to say WHICH failure. A bare "could not save" covers both a
+  // rejected value and a server that has no such route - the second means the
+  // app itself was not copied over, and no amount of retrying in the browser
+  // will fix it. Flask answers that with an HTML page, so .json() throws and
+  // there is no error field to report: the status is the only thing that
+  // distinguishes them.
+  let d = null, status = 0;
+  try{
+    const r = await fetch("/api/filaments/price", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({fkey, price_per_kg: txt === "" ? null : parseFloat(txt)})});
+    status = r.status;
+    d = await r.json();
+  }catch(_){}
+  if(!d || !d.ok){
+    const why = (d && d.error) ? d.error
+      : status === 404 ? t("the server does not know this route — copy app.py over and restart it")
+      : status ? "HTTP " + status
+      : t("no answer from the server");
+    toast(t("Could not save the price.") + " (" + why + ")", true);
+    return false;
+  }
+  // the figure is only believable if what it prices moved with it
+  toast(d.price_per_kg == null
+    ? t("Price cleared") + (d.recosted ? ` · ${d.recosted} ${t("prints re-costed")}` : "")
+    : t("Price saved") + (d.recosted ? ` · ${d.recosted} ${t("prints re-costed")}` : ""));
+  return true;
+}
+
 async function saveIdentity(fkey, fields){
   let d = null;
   try{
@@ -3466,11 +3616,31 @@ function editCell(cell, inputs, onSave){
     }, 0));
   });
 }
-$("filTable").addEventListener("click", e=>{
+$("filTable").addEventListener("click", async e=>{
+  const hex = e.target.closest("button.hexchip");
+  if(hex){
+    // the name cell is click-to-edit, and copying is not editing
+    e.stopPropagation();
+    // an async handler that throws produces an unhandled rejection and no
+    // feedback at all; a copy that fails should still say so
+    try{
+      if(await copyText(hex.dataset.hex)) toast(hex.dataset.hex + " " + t("copied"));
+    }catch(err){
+      console.error("copy failed:", err);
+      toast(t("Could not copy — the code is") + " " + hex.dataset.hex, true);
+    }
+    return;
+  }
   const ven = e.target.closest("td.ven.edit");
   if(ven){
     editCell(ven, [{k:"vendor", ph:t("e.g. Sunlu"), v:ven.dataset.vendor}],
              v=> saveIdentity(ven.dataset.fkey, {vendor: v.vendor}));
+    return;
+  }
+  const pr = e.target.closest("td.price.edit");
+  if(pr){
+    editCell(pr, [{k:"price", ph:t("e.g. 18.99"), v:pr.dataset.price}],
+             v=> savePrice(pr.dataset.fkey, v.price));
     return;
   }
   const nm = e.target.closest("td.fname.edit");
@@ -3550,7 +3720,8 @@ $("mrgList").addEventListener("click", async e=>{
       headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)})).json();
   }catch(_){}
   if(!d || !d.ok) toast(t("Could not merge.") + (d && d.error ? " ("+d.error+")" : ""), true);
-  else toast(t(body.into ? "Merged" : "Unmerged"));
+  else toast(t(body.into ? "Merged" : "Unmerged")
+           + (d.recosted ? ` · ${d.recosted} ${t("prints re-costed")}` : ""));
   loadFilaments();
 });
 $("filTable").addEventListener("click", async e=>{
@@ -3579,7 +3750,8 @@ $("filDupes").addEventListener("click", async e=>{
       body: JSON.stringify({from: b.dataset.from, into: b.dataset.into})})).json();
   }catch(_){}
   if(!d || !d.ok) toast(t("Could not merge.") + (d && d.error ? " ("+d.error+")" : ""), true);
-  else toast(t("Merged"));
+  else toast(t("Merged")
+           + (d.recosted ? ` · ${d.recosted} ${t("prints re-costed")}` : ""));
   loadFilaments();
 });
 async function loadFilaments(){
@@ -3606,6 +3778,8 @@ function renderFilTable(){
   const tb = $("filTable").querySelector("tbody");
   document.querySelectorAll("#filScopeSeg button").forEach(b=>
     b.classList.toggle("on", b.dataset.s === filScope));
+  document.querySelectorAll("#filColSeg button").forEach(b=>
+    b.classList.toggle("on", b.dataset.c === filColFmt));
   if(!all.length){
     tb.innerHTML = `<tr><td style="color:var(--text-3);padding:10px 0">${t("Nothing recorded yet — filament appears here once a print with slot data finishes.")}</td></tr>`;
     $("filMeta").textContent = ""; return;
@@ -3625,7 +3799,7 @@ function renderFilTable(){
     `<tr>${th("vendor", t("Vendor"))}${th("name", t("Filament"))}${th("type", t("Type"))}
          ${th("grams", t("Used"), "num")}<th>${t("Share")}</th>
          ${th("bought_g", t("Bought"), "num")}${th("left_g", t("Left"), "num")}
-         ${th("cost", t("Cost"), "num")}${th("prints", t("Prints"), "num")}
+         ${th("price_per_kg", t("€/kg"), "num")}${th("cost", t("Cost"), "num")}${th("prints", t("Prints"), "num")}
          ${th("last_used", t("Last used"))}<th>${t("Status")}</th><th class="del"></th></tr>` +
     (rows.length ? rows.map(f=>{
       const n = filName(f);
@@ -3636,13 +3810,17 @@ function renderFilTable(){
       return `<tr>
         <td class="ven${f.editable?" edit":""}"${ed} data-vendor="${esc(f.vendor)}"${
           f.editable?` title="${t("click to set the vendor")}"`:""}>${
-          esc(f.vendor) || (f.editable ? `<span class="unset">${t("unknown")}</span>` : "—")}</td>
+          esc(f.vendor) || (f.is_bambu === false
+            ? `<span class="unset">${t("third-party")}</span>`
+            : (f.editable ? `<span class="unset">${t("unknown")}</span>` : "—"))}</td>
         <td class="fname${f.editable?" edit":""}"${ed}
             data-product="${esc(f.product)}" data-colour="${esc(f.color_name)}"${
             f.editable?` title="${t("click to name this filament")}"`:""}>
           <span class="swatch" style="--sw:#${esc(f.color||"888888")}"></span>
           <span class="fn-txt"><b>${n.main}</b><span class="fn-sub">${n.sub}${
-            f.is_bambu===false ? " · "+t("third-party") : ""}</span></span></td>
+            n.shown && !n.dup ? ` <button class="hexchip" type="button" data-hex="${n.shown}"
+              title="${n.spelt} · ${n.hex} — ${t("copy this colour code")}">${n.shown}</button>` : ""}${
+            ""}</span></span></td>
         <td style="color:var(--text-2)">${esc(f.type)||"—"}</td>
         <td class="num">${f.grams ? kgF(f.grams) : "—"}</td>
         <td class="shr"><span class="mt"><span style="width:${Math.round((f.share||0)*100)}%"></span></span></td>
@@ -3650,6 +3828,17 @@ function renderFilTable(){
           f.spools ? `<span class="fn-sub"> ${f.spools}×</span>` : ""}</td>
         <td class="num"${f.left_g!=null && f.left_g<0 ? ' style="color:var(--warn)" title="'+t("more used than bought — older orders are missing from the log")+'"' : ""}>${
           f.left_g!=null ? kgF(f.left_g) : "—"}</td>
+        <td class="num price${f.editable?" edit":""}"${ed}
+            data-price="${f.price_per_kg != null ? f.price_per_kg : ""}"${
+            f.editable ? ` title="${f.price_per_kg != null
+              ? t("set by hand — click to change, empty to use the configured price")
+              : (f.list_per_kg ? t("from your invoices") + ` (${cur} ${f.list_per_kg}/kg)`
+                               : t("from the configured brand × material price")) +
+                " — " + t("click to set it by hand")}"` : ""}>${
+          f.price_per_kg != null
+            ? `<b>${money(f.price_per_kg, cur)}</b>`
+            : (f.list_per_kg ? `<span style="color:var(--text-3)">${money(f.list_per_kg, cur)}</span>`
+                             : `<span class="unset">—</span>`)}</td>
         <td class="num"${f.paid_per_kg ? ` title="${t("actually paid")}: ${cur} ${f.paid_per_kg}/kg"` : ""}>${money(f.cost, cur)}</td>
         <td class="num">${f.prints||0}</td>
         <td style="color:var(--text-2);white-space:nowrap">${last}</td>

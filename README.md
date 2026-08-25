@@ -129,11 +129,60 @@ per print must be accurate)
 - Identities are **remembered in the database** (`filaments` table), so a spool
   keeps its product line, colour code and colour name long after it has been used
   up and thrown away
+- **The colour code, click to copy.** A spool with no RFID gets its colour typed
+  in by hand on the printer, and the identity is `SKU|COLOUR` — so a hex one digit
+  off mints a *second* filament rather than reusing the one you already named.
+  Every row shows its colour next to the name as a chip; clicking it copies.
+  A **HEX / RGB** switch in the card head decides which form — Windows' own colour
+  dialog has Red/Green/Blue boxes and no hex field, Bambu Studio takes a hex, so
+  the useful one depends on where you are typing it. The choice is remembered,
+  the chip copies whatever it shows, and its tooltip always spells the channels
+  out (`Red 247 · Green 55 · Blue 55`) alongside the hex.
+  The copy path matters here: `navigator.clipboard` needs a **secure context**,
+  which a NAS on plain `http://` is not, so it falls back to `execCommand("copy")`
+  and, if even that is refused, to a prompt — the code always ends up somewhere
+  you can take it from
+- **Editable price per kg.** Click the `€/kg` cell to type what the spool actually
+  cost. A price set by hand **beats every other rule** — the configured brand ×
+  material matrix is a guess about a category, and an invoice-learned price is a
+  guess that the SKU on the receipt is the spool that was in the tray; neither
+  should overrule someone who looked at what they paid. It is the only way to
+  price third-party filament properly.
+  Setting it **re-costs the prints that already happened**: per-print costs are
+  stored (worked out when the cloud enriched the job), so a price that only
+  applied to future prints would leave the totals disagreeing with the number just
+  typed in. The toast reports how many prints moved. Clearing the field is not
+  zero — it hands the filament back to the configured rules and re-costs again.
+  A merged identity is priced by whichever row survived — and **merging re-costs
+  the prints it moved**. Two halves of one batch recorded under different slicer
+  profiles get different prices; saying they are the same filament has to make
+  them cost the same, or the merge fixes the Filament page and leaves History
+  contradicting it. Pricing therefore resolves the SKU through the identity, not
+  through whatever the print happened to report, so a folded print picks up the
+  survivor's invoice price. Unmerging re-costs them back. The RFID verdict still
+  decides whether an invoice price may be used at all, and it is taken from the
+  **identity** first: a print whose filament was not recognised is precisely the
+  one whose own snapshot cannot be trusted, and merging it into a known-genuine
+  identity is a person saying which spool it was. A third-party spool's identity
+  carries `is_bambu = false`, so it is still never priced as a Bambu one.
+  [`tools/why_this_price.py`](tools/why_this_price.py) shows, per print and per
+  slot, which identity it resolved to, the rate applied, the rule that chose it,
+  and what the rules would give today — including prints with no per-slot detail,
+  which no merge or price can ever re-cost. The cell shows **bold**
+  for a hand-set price, grey for one learned from your invoices, and a dash when
+  it falls through to the configured default
 - **Editable naming**: click a row's vendor or name to set **vendor / product /
   colour** by hand. This is the only way a third-party spool gets a name at all —
   the printer reports a borrowed Bambu profile and a colour, never a manufacturer
   — and it is what lets purchases match it, wording being the sole route without a
   colour code. Genuine spools show *Bambu Lab* without anyone typing it
+- **The names reach the AMS card too.** The AMS can only read a genuine Bambu
+  tag, so a third-party tray arrives with no name and its tile used to say "no
+  RFID data" even after the vendor, product and colour had been typed in here.
+  The identity the tray reports is the same one that was named, so the tile now
+  shows it — and a name set by hand beats the catalogue for a Bambu spool too,
+  the same rule this page follows. What does *not* change: no store link and no
+  low-stock flag for a spool with no tag, because neither can be known
 - Shows which filaments are **in the AMS right now** (slot, remaining %, Low flag)
   with the same **Reorder ↗** link, so the page doubles as a shopping list.
   A spool only shows a slot when the identity of the live tray is the *same*
@@ -282,22 +331,47 @@ server-side allowlist** — never a free-form gcode passthrough)
 - **Filament · Purchases** keeps the invoice importer folded away behind a
   button: the list is what you come to read, the importer is what you
   occasionally come to use.
-- **Two layouts**, swapped with the ✦ button. They differ in structure, not just
-  styling, so they are two documents rather than one document with a CSS layer:
-  - `dashboard.html` — the four sections above.
-  - `classic.html` — the previous eight-tab page, **frozen**. It is the way back,
-    not a second thing to maintain; fixes land in `dashboard.html`.
-
-  The button sets a `bambu_page` cookie and reloads; `/` reads that cookie and
-  serves whichever was chosen last, so the choice survives a restart and needs no
-  server-side state. `scratchpad/bm/t_layout.js` checks that both documents exist,
-  reach each other, and that no card was lost in the move.
 - **Responsive header** — below 1150 px the section bar moves onto a full-width
   row of its own and the serial/firmware line steps aside; below 560 px the
   last-update stamp folds away too, so the chips still fit on a phone
 - Live updates via Server-Sent Events (no polling from the browser)
 - **German by default with a DE/EN switcher**
 - Light/dark theme toggle
+- **Palette: Firefox Proton.** The browser's own scheme rather than a two-colour
+  pair — a neutral grey scale with one accent, so nothing has to be demoted to a
+  tint. Dark is Firefox's dark chrome: in-content `#1C1B22`, cards `#2B2A33`,
+  raised `#42414D`, text `#FBFBFE`. The accent is **Photon blue-40 `#45A1FF`**
+  rather than Proton's own `#00DDFF`: the cyan is authentic but a saturated neon,
+  and on a page made of small chips, bars and table rows it shouted from every
+  one of them. Light is
+  its counterpart: `#F9F9FB` ground, white cards, `#15141A` text, primary
+  `#0060DF`. Greys throughout: `#15141A #2B2A33 #42414D #5B5B66 #8F8F9D #CFCFD8
+  #F0F0F4 #FBFBFE`.
+  The accent is spent the way Firefox spends it: links, focus, the progress ring
+  and the primary action — nothing else. **Selection and identity are surfaces,
+  not blocks of accent**: the selected section is a lifted card the way a selected
+  Firefox tab is, the live state pill is a neutral chip with the state's colour as
+  its text and border (matching the `.st-ok`/`.st-bad` chips the history table
+  already used), and the app mark is the same neutral chip as the icon buttons it
+  sits beside. The AMS slot that is printing is the one place a **tint** is used:
+  a soft accent wash with a marker edge down its side, the pattern the warning
+  rows already use — a purely neutral treatment left it differing from an idle
+  slot by one pixel of border shade, which could not be seen. `t_palette.js`
+  fails if any of these becomes an accent *fill* again, and also if the loaded
+  slot ever loses its tint or its marker.
+  Everything that carries a colour is a token: `--brand`/`--brand-ink` for the
+  primary fill (which may differ per theme — blue in light, cyan in dark),
+  `--accent-ink` for whatever reads on an accent fill, `--on-status` because
+  status colours are dark in light mode and light in dark mode, and
+  `--good-soft`/`--warn-soft`/`--danger-soft` for their tints. The state pill picks
+  its own ink from the relative luminance of the colour it is handed.
+  Changing the scheme is a swap of the two token blocks; `scratchpad/bm/t_palette.js`
+  needs no edit, because it samples the palette rather than hardcoding it. It
+  checks every pair the stylesheet actually renders against its contrast floor,
+  that whatever is `--accent` is readable as text, that the ink picker returns
+  something legible on any fill, and that no colour is hardcoded outside the token
+  blocks — a logo gradient and a set of status tints each survived an earlier
+  palette change still mixed from a scheme that no longer existed
 - Non-blocking **toast** confirmations for actions that change stored data (the
   deleted row animates out before the table reloads), with errors shown in the
   same strip instead of a browser `alert()`

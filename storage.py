@@ -40,7 +40,10 @@ LATE_COLUMNS = {
     "purchases": {"code": "VARCHAR(24)", "list_price": "FLOAT"},
     # who made it. The RFID tag only says genuine-or-not, never a manufacturer,
     # so for third-party spools this can only come from the user.
-    "filaments": {"vendor": "VARCHAR(64)", "alias_of": "VARCHAR(64)"},
+    # a price typed in by hand, per filament identity - the config matrix
+    # cannot know what a third-party spool cost
+    "filaments": {"vendor": "VARCHAR(64)", "alias_of": "VARCHAR(64)",
+                  "price_per_kg": "FLOAT"},
     # notes shipped before they had categories
     "notes": {"category": "VARCHAR(60)"},
 }
@@ -74,7 +77,7 @@ PRINT_IMMUTABLE = {"job_id", "started_at", "label", "design_title",
 # those are aggregated from prints.filament_detail, which already has them for
 # every past print (see app._filament_stats).
 FILAMENT_COLS = ["fkey", "filament_id", "code", "vendor", "product", "color",
-                 "color_name", "type", "is_bambu", "alias_of",
+                 "color_name", "type", "is_bambu", "alias_of", "price_per_kg",
                  "first_seen", "last_seen"]
 
 # What was bought, as opposed to what was used. Kept as one row per order LINE
@@ -463,6 +466,22 @@ class Storage:
         conn, cur = self._cursor()
         cur.execute(f"UPDATE filaments SET {sets} WHERE fkey={self.ph}",
                     list(fields.values()) + [fkey])
+        n = cur.rowcount
+        if self.backend == "sqlite":
+            conn.commit()
+        else:
+            cur.close(); conn.close()
+        return n > 0
+
+    def set_filament_price(self, fkey: str, per_kg: float | None) -> bool:
+        """The price of one filament, per kg, set by hand.
+
+        Nullable on purpose: clearing it hands the filament back to the
+        configured brand x material matrix rather than pinning it at zero.
+        """
+        conn, cur = self._cursor()
+        cur.execute(f"UPDATE filaments SET price_per_kg={self.ph} WHERE fkey={self.ph}",
+                    (per_kg, fkey))
         n = cur.rowcount
         if self.backend == "sqlite":
             conn.commit()
