@@ -1,5 +1,8 @@
-# Local printer credentials - never commit (copy printer.config.example.json)
+# The database connection, written by the setup wizard. Holds a password.
+instance/
+# The old config file and whatever it was renamed to when it was imported
 printer.config.json
+printer.config.json.imported*
 
 # Local telemetry database (holds job names / printer serial, no need to publish)
 telemetry.db
@@ -10,7 +13,7 @@ telemetry.db
 # Captured telemetry samples (may contain identifiers)
 samples/
 
-# go2rtc relay: binary is downloaded per-arch, config is generated from printer.config.json
+# go2rtc relay: binary is downloaded per-arch, config is generated from the settings
 go2rtc/go2rtc_*
 go2rtc.yaml
 

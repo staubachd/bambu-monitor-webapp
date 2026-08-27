@@ -13,7 +13,7 @@ COLOR_NAMES is deliberately small: it contains only codes confirmed against real
 RFID reports. An unknown code is shown as its raw code plus the hex swatch rather
 than guessed at - a confidently wrong colour name is worse than none when the
 point is to buy the right spool again. Extend it without touching this file via
-`filament.color_names` in printer.config.json.
+`filament.color_names`, under Settings > Filament.
 
 Nothing here is authoritative about Bambu's catalogue; the store link is a
 *search*, not a product deep-link, so it keeps working when the catalogue changes.

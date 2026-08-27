@@ -349,9 +349,10 @@
   .brand h1{font-size:19px; margin:0; font-weight:650; letter-spacing:-.02em}
   .brand .sub{font-size:12.5px; color:var(--text-3); margin-top:1px}
   .hgap{flex:1}
-  /* the icon buttons form a row in the sidebar; on a narrow screen they fall
-     back to this and flow inline with the rest of the top bar */
-  .hdr-actions{display:contents}
+  /* the icon buttons are one unit: with display:contents they flowed as three
+     separate items and the third wrapped onto a line of its own as soon as the
+     bar got tight */
+  .hdr-actions{display:flex; align-items:center; gap:8px; margin-left:auto}
   .pill{
     display:inline-flex; align-items:center; gap:8px; font-size:12.5px; color:var(--text-2);
     background:var(--surface); border:1px solid var(--border); border-radius:999px;
@@ -797,6 +798,66 @@
   .hexchip:hover{border-color:var(--accent); color:var(--accent)}
   .hexchip:active{background:var(--accent-soft)}
 
+
+  /* the admin page's own tabs. A third level of navigation, so it is quieter
+     than the section bar and the view bar above it: text on a rule, no fill. */
+  .settabs{display:flex; align-items:center; gap:2px; flex-wrap:wrap;
+    margin:0 0 4px; border-bottom:1px solid var(--border)}
+  .settabs button{font:inherit; font-size:12.5px; font-weight:600; color:var(--text-3);
+    background:none; border:0; border-bottom:2px solid transparent;
+    padding:8px 13px; margin-bottom:-1px; cursor:pointer; transition:.15s;
+    white-space:nowrap; display:inline-flex; align-items:center; gap:6px}
+  .settabs button:hover{color:var(--text)}
+  .settabs button.on{color:var(--accent); border-bottom-color:var(--accent)}
+  /* this group holds an edit that has not been saved yet */
+  .settab-dot{width:5px; height:5px; border-radius:50%; background:var(--accent)}
+
+  /* "reset to 15" sits inside the note line, so it has to read as a word in a
+     sentence rather than as a control competing with the field above it */
+  .linkbtn{
+    border:0; background:none; padding:0; font:inherit; font-size:inherit;
+    color:var(--accent); cursor:pointer; text-decoration:underline;
+    text-underline-offset:2px;
+  }
+  .linkbtn:hover{color:var(--text)}
+  .set-field.resetting .set-lbl{color:var(--text-3); font-weight:600}
+  /* the connection is shown, not edited: no box, no focus ring, nothing that
+     invites a click */
+  .conn-v{font-family:ui-monospace,Menlo,Consolas,monospace; font-size:13px;
+          color:var(--text-2); align-self:center}
+
+  /* ---------- settings ----------
+     A form generated from the server's schema: two columns so the label and the
+     control line up down the page however many groups there are. */
+  .set-field{padding:9px 0; border-top:1px solid var(--border)}
+  .set-field:first-child{border-top:0}
+  .set-field.edited .set-lbl{color:var(--accent); font-weight:700}
+  .set-row{display:grid; grid-template-columns:minmax(180px,260px) minmax(0,1fr);
+    gap:14px; align-items:center}
+  .set-lbl{font-size:13px; font-weight:600; color:var(--text-2)}
+  .set-row input[type=text], .set-row input[type=password], .set-row select{
+    font:inherit; font-size:13px; width:min(320px,100%); padding:6px 10px;
+    border-radius:9px; border:1px solid var(--border-strong);
+    background:var(--surface-2); color:var(--text); outline:none}
+  .set-row input:focus, .set-row select:focus{border-color:var(--accent)}
+  .set-row input[type=checkbox]{width:16px; height:16px; accent-color:var(--accent);
+    cursor:pointer; justify-self:start}
+  .set-note{margin:3px 0 0 0; padding-left:calc(min(260px,100%) + 14px);
+    font-size:11.5px; color:var(--text-3)}
+  .set-src{color:var(--text-3)}
+  .set-matrix{align-items:start}
+  .mtx{display:flex; flex-direction:column; gap:5px}
+  .mtx-row{display:grid; grid-template-columns:minmax(0,1fr) 110px 28px; gap:6px}
+  .mtx input{font:inherit; font-size:12.5px; padding:5px 9px; border-radius:8px;
+    border:1px solid var(--border-strong); background:var(--surface-2);
+    color:var(--text); outline:none; min-width:0}
+  .mtx input.num{text-align:right; font-variant-numeric:tabular-nums}
+  .mtx-add{margin-top:7px; justify-self:start}
+  @media(max-width:720px){
+    .set-row{grid-template-columns:minmax(0,1fr); gap:5px}
+    .set-note{padding-left:0}
+  }
+
   /* ---------- notes ---------- */
   .note-new{display:flex; flex-direction:column; gap:9px; margin-bottom:16px}
   .note-title-in{font:inherit; font-size:14px; font-weight:640; width:100%;
@@ -996,11 +1057,16 @@
         <button data-lang="en">EN</button>
       </span>
     </span>
-    <!-- one row of equal-width buttons in the sidebar; display:contents again
-         below 1000px, where the sidebar folds back into a top bar -->
+    <!-- light, settings, theme: one group, kept together and pushed to the
+         right so a narrow bar wraps all three at once instead of stranding
+         whichever one no longer fits -->
     <div class="hdr-actions">
       <button class="icon-btn" id="ledBtn" title="Chamber light" disabled>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"/></svg>
+      </button>
+      <button class="icon-btn" id="settingsBtn" title="Settings" aria-label="Settings">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.2.6.75 1.02 1.4 1.02H21a2 2 0 1 1 0 4h-.09c-.65 0-1.2.42-1.51 1z"/></svg>
       </button>
       <button class="icon-btn" id="themeBtn" title="Toggle theme">◐</button>
     </div>
@@ -1378,6 +1444,27 @@
   </div>
 
   <!-- ============ WORKSHOP · Notes ============ -->
+  <!-- ============ WORKSHOP - Settings ============
+       Rendered from the schema the server sends, so the form cannot drift out
+       of step with what the server will actually accept. -->
+  <div class="dash view" id="v-settings-page">
+    <section class="card span-12">
+      <div class="card-head">
+        <h3 data-i18n="Settings">Settings</h3>
+        <span class="meta" id="setMeta"></span>
+        <button class="wbtn" id="setSave" style="margin-left:auto"
+                data-i18n="Save changes">Save changes</button>
+      </div>
+      <div class="warn" id="setAuthNote" style="border-left-color:var(--warn)">
+        <span class="ic">!</span>
+        <span data-i18n="This page has no login: anyone who can reach the dashboard can change these, including the printer and account credentials.">This page has no login: anyone who can reach the dashboard can change these, including the printer and account credentials.</span>
+      </div>
+      <nav class="settabs" id="setTabs"></nav>
+      <div id="setGroups"></div>
+      <div class="mnt-note" id="setFootnote"></div>
+    </section>
+  </div>
+
   <div class="dash view" id="v-workshop-notes">
     <section class="card span-12">
       <div class="card-head">
@@ -1729,6 +1816,86 @@ const DE = {
   "Red":"Rot", "Green":"Grün", "Blue":"Blau", "colour format":"Farbformat",
   "Could not copy — the code is":"Kopieren nicht möglich — der Code ist",
   "Copy this colour:":"Diese Farbe kopieren:",
+  // settings: the schema's own labels and help, so the page is not half German
+  "Allow assigning AMS slots":"AMS-Slots zuweisen erlauben",
+  "Allow sending G-code":"G-Code senden erlauben",
+  "Bambu Cloud enabled":"Bambu Cloud aktiv",
+  "Bambu account":"Bambu-Konto",
+  "Bambu password":"Bambu-Passwort",
+  "Bambu, per material":"Bambu, je Material",
+  "Beats the brand tables. Rarely needed.":"Schlägt die Markentabellen. Selten nötig.",
+  "Camera enabled":"Kamera aktiv",
+  "Cloud token":"Cloud-Token",
+  "Currency":"Währung",
+  "Default price per kg":"Standardpreis pro kg",
+  "Electricity price per kWh":"Strompreis pro kWh",
+  "Filled in automatically after a successful sign-in.":"Wird nach erfolgreicher Anmeldung automatisch gefüllt.",
+  "From the printer's screen: Settings > Network.":"Am Druckerdisplay: Einstellungen > Netzwerk.",
+  "Genuine spools are priced from your own orders, list price, ahead of the tables above.":"Original-Spulen werden aus deinen Bestellungen bepreist – Listenpreis, vor den Tabellen oben.",
+  "Keep recording after a print (min)":"Nachlauf nach dem Druck (min)",
+  "Keep telemetry for (days)":"Messdaten aufbewahren (Tage)",
+  "LAN access code":"LAN-Zugangscode",
+  "LAN address of the printer. Reconnects on restart.":"LAN-Adresse des Druckers. Verbindet beim Neustart neu.",
+  "Low-stock threshold %":"Schwelle „wenig übrig“ %",
+  "Model":"Modell",
+  "Override by AMS slot":"Überschreiben je AMS-Slot",
+  "Override by SKU":"Überschreiben je SKU",
+  "Override by material":"Überschreiben je Material",
+  "Plug IP":"Plug-IP",
+  "Plug model":"Plug-Modell",
+  "Poll every (s)":"Abfrage alle (s)",
+  "Price from imported invoices":"Preis aus importierten Rechnungen",
+  "Price per kg for genuine spools, by material. 'default' catches the rest.":"Preis pro kg für Original-Spulen, je Material. „default“ fängt den Rest ab.",
+  "Printer IP":"Drucker-IP",
+  "RTSP port":"RTSP-Port",
+  "Rejected by current firmware (HMS 0500_0500_0001_0007).":"Von der aktuellen Firmware abgelehnt (HMS 0500_0500_0001_0007).",
+  "Sends raw G-code to the printer. Rejected by current firmware, and this page has no login - leave off unless you need it.":"Sendet rohen G-Code an den Drucker. Von der aktuellen Firmware abgelehnt, und diese Seite hat kein Login – aus lassen, wenn du ihn nicht brauchst.",
+  "Serial":"Seriennummer",
+  "Smart plug enabled":"Smart Plug aktiv",
+  "Store region":"Store-Region",
+  "Stream name":"Streamname",
+  "Sync every (min)":"Sync alle (min)",
+  "Tapo account":"Tapo-Konto",
+  "Tapo password":"Tapo-Passwort",
+  "Telemetry sample interval (s)":"Messintervall (s)",
+  "Third-party, per material":"Fremdhersteller, je Material",
+  "Used when no more specific rule matches.":"Gilt, wenn keine genauere Regel passt.",
+  "WebRTC port":"WebRTC-Port",
+  "Which Bambu store the Reorder link points at.":"Auf welchen Bambu-Store der Nachbestellen-Link zeigt.",
+  "Store address override":"Store-Adresse überschreiben",
+  "Leave empty unless the region list has the wrong address for you.":
+    "Leer lassen, außer die Regionsliste hat die falsche Adresse für dich.",
+  "Extra colour names":"Zusätzliche Farbnamen",
+  "Hex code to name, for colours the built-in list gets wrong.":
+    "Hex-Code zu Name, für Farben, die die eingebaute Liste falsch benennt.",
+  "go2rtc binary":"go2rtc-Programm",
+  "Relative to the app folder. The default is the Synology's ARM64 build.":
+    "Relativ zum App-Ordner. Standard ist der ARM64-Build für die Synology.",
+  "go2rtc port":"go2rtc-Port",
+  // settings
+  "Settings":"Einstellungen", "Save changes":"Änderungen speichern",
+  "Settings saved":"Einstellungen gespeichert",
+  "Could not save the settings.":"Einstellungen konnten nicht gespeichert werden.",
+  "Could not load the settings.":"Einstellungen konnten nicht geladen werden.",
+  "needs a restart":"Neustart nötig", "set here":"hier gesetzt", "from":"aus",
+  "default":"Standard", "reset to":"zurück auf", "empty":"leer",
+  "row":"Zeile", "rows":"Zeilen",
+  "Database":"Datenbank", "Connection":"Verbindung", "Backend":"Backend",
+  "Host":"Host", "User":"Benutzer", "Database name":"Datenbankname", "File":"Datei",
+  "Stored in":"Gespeichert in",
+  "on the machine running the app":"auf dem Rechner, auf dem die App läuft",
+  "This is the only setting that cannot live in the database - the app has to read it before it can read anything else. The setup wizard writes it; nothing else does.":
+    "Das ist die einzige Einstellung, die nicht in der Datenbank liegen kann – die App muss sie lesen, bevor sie überhaupt etwas lesen kann. Der Einrichtungsassistent schreibt sie, sonst niemand.",
+  "To change it, stop the app and run":"Zum Ändern die App stoppen und",
+  "then answer the first page again.":"ausführen und die erste Seite neu beantworten.",
+  "unsaved change":"ungespeicherte Änderung", "unsaved changes":"ungespeicherte Änderungen",
+  "Restart the app for these to take effect":"Für diese Änderungen die App neu starten",
+  "set — type to replace":"gesetzt – zum Ersetzen tippen", "not set":"nicht gesetzt",
+  "+ Add row":"+ Zeile", "remove":"entfernen", "name":"Name",
+  "Printer":"Drucker", "Cost":"Kosten", "Controls":"Steuerung",
+  "Recording":"Aufzeichnung", "Power":"Strom", "Cloud":"Cloud", "Camera":"Kamera",
+  "This page has no login: anyone who can reach the dashboard can change these, including the printer and account credentials.":
+    "Diese Seite hat kein Login: Wer das Dashboard erreicht, kann das hier ändern – auch Drucker- und Kontozugangsdaten.",
   "Timeline":"Zeitachse", "Groups first":"Gruppen zuerst",
   "Only groups":"Nur Gruppen", "Only singles":"Nur Einzelne",
   "Single prints":"Einzelne Drucke",
@@ -4553,6 +4720,247 @@ function setLive(on){
   }catch(_){}
 })();
 
+/* ---------- settings ----------
+   The form is built from the schema the server sends, never hand-written here:
+   a field the server will not accept cannot appear, and one it expects cannot be
+   forgotten. Only what was actually edited is sent. */
+let setSchema = null;
+const setEdits = new Map();          // path -> new value, unsaved
+
+function setField(f){
+  const id = "set:" + f.path;
+  const dis = f.danger ? ' style="color:var(--danger)"' : "";
+  if(f.kind === "bool")
+    return `<label class="set-row"><span class="set-lbl"${dis}>${esc(t(f.label))}</span>
+      <input type="checkbox" data-path="${esc(f.path)}" data-kind="bool"
+             ${f.value ? "checked" : ""} id="${esc(id)}"></label>`;
+  if(f.kind === "select")
+    return `<label class="set-row"><span class="set-lbl">${esc(t(f.label))}</span>
+      <select data-path="${esc(f.path)}" id="${esc(id)}">${
+        f.options.map(o=>`<option${o===f.value?" selected":""}>${esc(o)}</option>`).join("")
+      }</select></label>`;
+  if(f.kind === "matrix" || f.kind === "pairs"){
+    const rows = Object.entries(f.value || {});
+    const num = f.kind === "matrix";        // pairs are text on both sides
+    return `<div class="set-row set-matrix"><span class="set-lbl">${esc(t(f.label))}</span>
+      <div class="mtx" data-path="${esc(f.path)}" data-num="${num ? 1 : 0}">${
+        rows.map(([k,v])=>`<div class="mtx-row">
+          <input class="mtx-k" value="${esc(k)}" data-i18n-ph="name">
+          <input class="mtx-v${num ? " num" : ""}" value="${esc(v)}"${
+            num ? ' inputmode="decimal"' : ""}>
+          <button class="gbtn mtx-x" type="button" title="${t("remove")}">✕</button>
+        </div>`).join("")
+      }</div>
+      <button class="wbtn mtx-add" type="button" data-path="${esc(f.path)}"
+        >${t("+ Add row")}</button></div>`;
+  }
+  // secret: the current one is never sent here, so an empty box means "leave it"
+  const type = f.kind === "secret" ? "password" : "text";
+  const ph = f.kind === "secret"
+    ? (f.is_set ? t("set — type to replace") : t("not set"))
+    : "";
+  return `<label class="set-row"><span class="set-lbl"${dis}>${esc(t(f.label))}</span>
+    <input type="${type}" data-path="${esc(f.path)}" id="${esc(id)}"
+           value="${f.kind === "secret" ? "" : esc(f.value == null ? "" : f.value)}"
+           placeholder="${esc(ph)}" autocomplete="off"></label>`;
+}
+
+function hasDefault(f){ return f.default !== undefined && f.default !== null; }
+
+// The wizard stores an answer even when the answer happens to equal the
+// default, so plenty of fields are "set" to exactly what resetting them would
+// put back. Offering "reset to 20" beside a box reading 20 is an offer to do
+// nothing, and reads as a bug.
+function sameAsDefault(f){
+  return JSON.stringify(f.value ?? null) === JSON.stringify(f.default ?? null);
+}
+
+// What "reset" would put back, short enough to sit inside a sentence. A whole
+// price table cannot, so it says how many rows instead of listing them.
+function showDefault(f){
+  const d = f.default;
+  if(typeof d === "boolean") return t(d ? "on" : "off");
+  if(d && typeof d === "object"){
+    const n = Object.keys(d).length;
+    return n ? `${n} ${t(n===1 ? "row" : "rows")}` : t("empty");
+  }
+  return d === "" ? t("empty") : String(d);
+}
+
+// which group is on screen. Everything on one page was a wall of fields; the
+// groups the schema already declares are the natural tabs, so the strip is built
+// from them rather than hand-listed here.
+let setGroup = localStorage.getItem("bambu-setgroup") || null;
+
+function renderSettings(){
+  if(!setSchema) return;
+  const byGroup = {};
+  for(const f of setSchema.settings) (byGroup[f.group] ||= []).push(f);
+  // the connection is not a setting and cannot be edited here, but it is the
+  // first thing anyone looks for once the config file is gone
+  const tabs = setSchema.groups.concat(setSchema.connection ? ["Database"] : []);
+  if(!tabs.includes(setGroup)) setGroup = tabs[0];
+  $("setTabs").innerHTML = tabs.map(g=>{
+    // A dot marks unsaved edits in a group. It used to mark "set here rather
+    // than in the config file", which was worth pointing at while most values
+    // came from the file; now that everything is stored, that marked every tab
+    // and meant nothing. Unsaved edits are the thing you can lose by leaving.
+    const edited = (byGroup[g] || []).some(f=> setEdits.has(f.path));
+    return `<button data-group="${esc(g)}"${g===setGroup?' class="on"':''}>${t(g)}${
+      edited ? '<span class="settab-dot"></span>' : ""}</button>`;
+  }).join("");
+  if(setGroup === "Database"){ renderConnection(); return; }
+  $("setGroups").innerHTML = [setGroup].map(g=>`
+    <div class="sub-sec">
+      ${byGroup[g].map(f=>`<div class="set-field${
+          setEdits.has(f.path) ? " edited" : ""}${
+          setEdits.get(f.path) === null ? " resetting" : ""}">${setField(
+            setEdits.get(f.path) === null ? {...f, value: f.default, overridden: false} : f)}
+        <div class="set-note">${[
+            f.help ? esc(t(f.help)) : "",
+            f.live ? "" : `<b>${t("needs a restart")}</b>`,
+            // A value is either one somebody set or the default the code
+            // declares. After the wizard nearly everything is set, so saying so
+            // on every row says nothing; the default is the state worth naming,
+            // and the way back to it is the only thing worth offering.
+            f.overridden
+              ? (!hasDefault(f) || sameAsDefault(f) ? ""
+                 : `<button class="linkbtn set-reset" data-path="${esc(f.path)}"
+                      >${t("reset to")} ${esc(showDefault(f))}</button>`)
+              : `<span class="set-src">${t("default")}</span>`,
+          ].filter(Boolean).join(" · ")}</div>
+      </div>`).join("")}
+    </div>`).join("");
+  const n = setEdits.size;
+  $("setMeta").textContent = n ? `${n} ${t(n===1 ? "unsaved change" : "unsaved changes")}` : "";
+  $("setSave").disabled = !n;
+}
+
+const BACKEND_LABEL = {mariadb: "MariaDB", mysql: "MySQL", sqlite: "SQLite"};
+
+function renderConnection(){
+  const c = setSchema.connection;
+  // redacted() puts a server connection under "server" whichever backend it is,
+  // so this needs no branch per backend
+  const m = c.server || {};
+  const local = m.host === "127.0.0.1" || m.host === "localhost" || m.host === "::1";
+  const rows = c.server
+    ? [["Backend", BACKEND_LABEL[c.backend] || c.backend],
+       // 127.0.0.1 is the machine the app runs on, which is not the machine
+       // this page is being read on - worth saying, since it looks wrong
+       ["Host", `${m.host}:${m.port}` + (local ? ` — ${t("on the machine running the app")}` : "")],
+       ["User", m.user], ["Database name", m.database], ["Password", m.password]]
+    : [["Backend", BACKEND_LABEL[c.backend] || c.backend], ["File", c.sqlite_path]];
+  $("setGroups").innerHTML = `<div class="sub-sec">
+    ${rows.map(([k, v])=>`<div class="set-field"><div class="set-row">
+        <span class="set-lbl">${t(k)}</span>
+        <span class="conn-v">${esc(v)}</span></div></div>`).join("")}
+    <div class="set-note" style="margin-top:14px">
+      ${t("This is the only setting that cannot live in the database - the app has to read it before it can read anything else. The setup wizard writes it; nothing else does.")}
+      <div style="margin-top:8px">${t("Stored in")} <code>${esc(c.path)}</code></div>
+      <div style="margin-top:4px">${t("To change it, stop the app and run")}
+        <code>python app.py --setup</code> ${t("then answer the first page again.")}</div>
+    </div></div>`;
+  const n = setEdits.size;
+  $("setMeta").textContent = n ? `${n} ${t(n===1 ? "unsaved change" : "unsaved changes")}` : "";
+  $("setSave").disabled = !n;
+}
+
+async function loadSettings(){
+  try{ setSchema = await (await fetch("/api/settings")).json(); }
+  catch(_){ toast(t("Could not load the settings."), true); return; }
+  setEdits.clear();
+  renderSettings();
+}
+
+// one delegated listener: the form is rebuilt on every render, so per-field
+// handlers would have to be re-attached each time
+$("setTabs").addEventListener("click", e=>{
+  const b = e.target.closest("button");
+  if(!b) return;
+  setGroup = b.dataset.group;
+  localStorage.setItem("bambu-setgroup", setGroup);
+  renderSettings();          // unsaved edits survive: they live in setEdits
+});
+$("setGroups").addEventListener("input", e=>{
+  const el = e.target.closest("[data-path]");
+  if(!el) return;
+  const path = el.dataset.path;
+  const mtx = el.closest(".mtx");
+  if(mtx){ markMatrix(mtx); return; }       // read whole, and now, not at save
+  setEdits.set(path, el.type === "checkbox" ? el.checked : el.value);
+  $("setMeta").textContent = `${setEdits.size} ${
+    t(setEdits.size===1 ? "unsaved change" : "unsaved changes")}`;
+  $("setSave").disabled = false;
+  const field = el.closest(".set-field");
+  if(field) field.classList.add("edited");
+});
+$("setGroups").addEventListener("click", e=>{
+  const add = e.target.closest(".mtx-add");
+  if(add){
+    const mtx = add.parentElement.querySelector(".mtx");
+    const num = mtx.dataset.num !== "0";
+    mtx.insertAdjacentHTML("beforeend", `<div class="mtx-row">
+      <input class="mtx-k" placeholder="${t("name")}">
+      <input class="mtx-v${num ? " num" : ""}"${num ? ' inputmode="decimal"' : ""}>
+      <button class="gbtn mtx-x" type="button" title="${t("remove")}">✕</button></div>`);
+    markMatrix(mtx);
+    return;
+  }
+  const x = e.target.closest(".mtx-x");
+  if(x){ const mtx = x.closest(".mtx"); x.closest(".mtx-row").remove(); markMatrix(mtx); return; }
+  const rst = e.target.closest(".set-reset");
+  if(rst){
+    // null is what the save endpoint reads as "drop this and use the default",
+    // so a reset is an unsaved edit like any other and can be abandoned
+    setEdits.set(rst.dataset.path, null);
+    renderSettings();
+  }
+});
+function markMatrix(mtx){
+  const out = {};
+  mtx.querySelectorAll(".mtx-row").forEach(r=>{
+    const k = r.querySelector(".mtx-k").value.trim();
+    const v = r.querySelector(".mtx-v").value.trim();
+    if(k) out[k] = v;
+  });
+  setEdits.set(mtx.dataset.path, out);
+  $("setSave").disabled = false;
+  $("setMeta").textContent = `${setEdits.size} ${
+    t(setEdits.size===1 ? "unsaved change" : "unsaved changes")}`;
+}
+
+$("setSave").addEventListener("click", async ()=>{
+  // matrices are gathered at save time, not per keystroke
+  // only the open tab is rendered; the others are already captured in setEdits
+  document.querySelectorAll("#setGroups .mtx").forEach(m=>{
+    if(setEdits.has(m.dataset.path)) markMatrix(m);
+  });
+  if(!setEdits.size) return;
+  const changes = Object.fromEntries(setEdits);
+  let d = null, status = 0;
+  try{
+    const r = await fetch("/api/settings", {method:"POST",
+      headers:{"Content-Type":"application/json"}, body: JSON.stringify({changes})});
+    status = r.status;
+    d = await r.json();
+  }catch(_){}
+  if(!d || !d.ok){
+    const why = (d && d.error) ? d.error
+      : status === 404 ? t("the server does not know this route — copy app.py over and restart it")
+      : status ? "HTTP " + status : t("no answer from the server");
+    toast(t("Could not save the settings.") + " (" + why + ")", true);
+    return;
+  }
+  toast(t("Settings saved") + ` · ${d.saved.length}`);
+  if(d.restart_needed.length)
+    $("setFootnote").innerHTML = `<b>${t("Restart the app for these to take effect")}:</b> `
+      + d.restart_needed.map(esc).join(", ");
+  else
+    $("setFootnote").textContent = "";
+  await loadSettings();
+});
+
 /* ---------- navigation ----------
    Four sections, each with its own views. One map drives the second-level bar,
    the routing and the address bar, so a view cannot exist in one and be missing
@@ -4562,9 +4970,14 @@ const NAV = {
   prints:   [["history","History"], ["statistics","Statistics"]],
   filament: [["inventory","Inventory"], ["purchases","Purchases"]],
   workshop: [["maintenance","Maintenance"], ["notes","Notes"]],
+  // reached by the gear, not by the section bar: it is about the app, not
+  // about the printer, and it has its own tabs inside
+  settings: [["page","Settings"]],
   live:     [["camera","Live view"]],
 };
 const VIEW = {sec:"printer", view:"now"};
+// sections with no button in the masthead
+const NAV_HIDDEN = new Set(["settings"]);
 // what to (re)load when a view comes on screen
 const ON_SHOW = {
   // charts keep fixed viewBox coordinates while hidden, but a redraw after the
@@ -4576,6 +4989,7 @@ const ON_SHOW = {
   "filament/purchases": ()=>{ loadFilaments(); },
   "workshop/maintenance": ()=>{ loadMaint(); },
   "workshop/notes":     ()=>{ loadNotes(); },
+  "settings/page":      ()=>{ loadSettings(); },
 };
 function go(sec, view, replace){
   if(!NAV[sec]) sec = "printer";
@@ -4588,6 +5002,7 @@ function go(sec, view, replace){
 
   document.querySelectorAll("#sections button").forEach(b=>
     b.classList.toggle("on", b.dataset.sec === sec));
+  $("settingsBtn").classList.toggle("on", sec === "settings");
   // a section with a single view has nothing to choose between, so it gets no
   // second-level bar rather than a bar with one entry in it
   $("subnav").innerHTML = NAV[sec].length < 2 ? "" :
@@ -4608,6 +5023,7 @@ function go(sec, view, replace){
   try{ (ON_SHOW[key] || (()=>{}))(); }
   catch(e){ console.error("view " + key + " failed to load:", e); }
 }
+$("settingsBtn").addEventListener("click", ()=> go("settings", "page"));
 $("sections").addEventListener("click", e=>{
   const b = e.target.closest("button");
   // returning to a section lands on its first view
@@ -4627,7 +5043,7 @@ addEventListener("hashchange", ()=>{
   go(s, v, true);
 })();
 
-/* ---------- health warnings dropdown ---------- */
+  /* ---------- health warnings dropdown ---------- */
 $("healthBtn").addEventListener("click", e=>{
   e.stopPropagation();
   $("healthPanel").classList.toggle("open");

@@ -34,12 +34,9 @@ from storage import Storage             # noqa: E402
 
 APPLY = "--apply" in sys.argv
 
-with open(os.path.join(HERE, "printer.config.json"), encoding="utf-8") as fh:
-    cfg = json.load(fh)
-scfg = cfg.get("storage", {"backend": "sqlite"})
-if scfg.get("backend", "sqlite") == "sqlite" and not os.path.isabs(scfg.get("sqlite_path", "telemetry.db")):
-    scfg = {**scfg, "sqlite_path": os.path.join(HERE, scfg.get("sqlite_path", "telemetry.db"))}
-store = Storage(scfg)
+import config_store  # noqa: E402
+
+store, cfg = config_store.open_live()
 
 rows = [r for r in store.all_prints() if r.get("design_id")]
 rows.sort(key=lambda r: r.get("started_at") or 0)

@@ -1,6 +1,10 @@
 paho-mqtt>=2.0
 flask>=3.0
 PyMySQL>=1.1
+# OPTIONAL, and only for MySQL 8: its default caching_sha2_password plugin needs
+# this. MariaDB and older MySQL do not. Installed by default because a login
+# that fails for a missing library is a miserable thing to debug on a NAS.
+cryptography>=42.0
 # smart-plug power monitoring (Tapo P110/P110M) - prebuilt aarch64 cp39 wheel exists
 tapo>=0.8.7
 # OPTIONAL: read invoice PDFs on the Filament page. Pure Python, so it installs

@@ -32,6 +32,8 @@ runnable on Windows/macOS/Linux for development.
 - [Live view (camera)](#live-view-camera)
 - [HTTP API](#http-api)
 - [Storage & database schema](#storage--database-schema)
+  - [Keeping an idle app quiet](#keeping-an-idle-app-quiet)
+  - [Adding another backend](#adding-another-backend)
 - [How the tricky bits work](#how-the-tricky-bits-work)
 - [Troubleshooting](#troubleshooting)
 - [Disclaimer](#disclaimer)
@@ -337,6 +339,49 @@ server-side allowlist** — never a free-form gcode passthrough)
 - Live updates via Server-Sent Events (no polling from the browser)
 - **German by default with a DE/EN switcher**
 - Light/dark theme toggle
+- **Settings page** (the gear, top right) — prices, the filament matrices,
+  thresholds, intervals, feature gates and the printer / Tapo / Bambu Cloud
+  credentials, edited in the browser instead of by hand in JSON on the NAS.
+  Settings are not a sixth thing to browse alongside Printer / Prints / Filament
+  / Workshop, so they get an icon rather than a place in the section bar; the
+  section exists in `NAV` but is listed in `NAV_HIDDEN`, which keeps it out of
+  the bar while the router, the deep links (`#settings/page`) and the layout
+  test still treat it as a normal section.
+  - **Grouped into tabs** built from the schema's own `group` field — Printer,
+    Cost, Filament, Controls, Recording, Power, Cloud, Camera — so adding a
+    setting never means touching the tab strip. A dot on a tab marks unsaved
+    edits in that group, so nothing is lost by saving from a different tab. The
+    open tab is remembered. A ninth tab, **Database**, shows the connection
+    read-only — it is the one thing this page cannot change.
+  - Edits **survive a tab switch**: a change is captured when you make it, not
+    when the field happens to be on screen at save time.
+  - **One source.** Every setting is a row in the database. There is no config
+    file underneath it, so a value is either one somebody set or the default
+    declared next to the setting in `settings_schema.py`. A field at its default
+    says so; a field that was changed offers the way back, and only when that
+    would actually change something. Resetting deletes the row rather than
+    storing a copy of the default, so a later change to the default still
+    reaches an install that never touched it.
+  - **Applied immediately** wherever it can be. The sections the code binds at
+    import (`FIL_CFG`, `COST_CFG`, …) are live views rather than snapshots, so an
+    edited price is in force on the next print without a restart and without 60
+    call sites changing. What genuinely cannot be live — ports, the camera, the
+    printer connection — is labelled **needs a restart** on the field itself
+    rather than quietly doing nothing.
+  - **The schema is the gate.** One table (`settings_schema.py`) defines every
+    editable setting, its type and its range; it drives the form, the validation
+    and the restart labels together. Anything not in it cannot be written through
+    the API at all — including the database connection, which the app has to
+    read before it can read anything else (see **Setup** below).
+  - **Secrets are never sent to the browser.** A password field shows only
+    whether one is set; an empty box means "leave it alone", never "erase it".
+  - A whole form is validated before anything is stored, so one bad field cannot
+    leave half a page applied.
+
+  > **There is no login on this page.** Anyone who can reach the dashboard can
+  > change these, including the credentials and the G-code gate. That was a
+  > deliberate choice for a LAN-only tool; putting it behind a reverse proxy with
+  > basic auth is the obvious next step if the network is not trusted.
 - **Palette: Firefox Proton.** The browser's own scheme rather than a two-colour
   pair — a neutral grey scale with one accent, so nothing has to be demoted to a
   tint. Dark is Firefox's dark chrome: in-content `#1C1B22`, cards `#2B2A33`,
@@ -447,7 +492,7 @@ whenever the server pushes a new state.
 | Smart plug       | **`tapo`** library (async; driven from a thread)                     |
 | Camera relay     | **go2rtc** (single static binary, no Docker) — RTSPS → WebRTC/MSE, launched & supervised by `app.py` |
 | Invoice import   | **pypdf** — optional, pure Python (no compiler needed on the NAS); absent it, the paste path still works |
-| Database         | **SQLite** (local dev) / **MariaDB** via **PyMySQL** (production on NAS) |
+| Database         | **SQLite** (local dev) / **MariaDB** or **MySQL** via **PyMySQL** (production on NAS) |
 | Frontend         | Single hand-written `dashboard.html` — vanilla JS, CSS Grid, inline-SVG charts. **No build step, no framework, no external assets** (matters behind a strict/offline NAS). |
 | i18n             | English strings are the keys; a `DE` dictionary provides German; missing entries degrade to English |
 | Process mgmt     | POSIX `sh` launcher + pidfile, driven by Synology Task Scheduler (boot + 5-min watchdog) |
@@ -501,11 +546,17 @@ Design constraints that shaped these choices:
 | `bambu_cloud.py`              | Bambu Cloud client (login, task list) for finished-print enrichment.    |
 | `filament_catalog.py`         | Colour-code → colour-name table, regional Bambu store search links, and the best-effort order-confirmation parser. Has a self-test (`python filament_catalog.py`). |
 | `dashboard.html`             | The entire frontend (HTML + CSS + JS + i18n) in one file.               |
-| `printer.config.json`         | **All configuration and secrets** (printer, plug, cost, filament, storage, cloud, camera). Not committed. |
+| `bootstrap.py`                | The database connection — the only thing that cannot live in the database. Reads/writes `instance/db.json`, and tests a connection before anything is written to it. |
+| `config_store.py`             | Every other setting, read through from the database with live section views. |
+| `settings_schema.py`          | The one table describing every editable setting: type, range, default, group, and whether it needs a restart. |
+| `setup_wizard.py` / `setup.html` | First-run setup. Served instead of the dashboard when there is no connection on file. |
+| `instance/db.json`            | Written by the wizard: host, port, user, password, database. Seven keys, chmod 600, never edited by hand. Not committed. |
 | `requirements.txt`            | Python dependencies.                                                    |
 | `go2rtc/`                     | The go2rtc relay binary for the camera Live view (downloaded per-arch; not committed). |
 | **`tools/`**                  | Dev & one-time setup helpers — not part of the running app.             |
-| `tools/setup_cloud.py`        | Interactive Bambu Cloud login → stores an auth token in the config.     |
+| `tools/why_disk_busy.py`      | Read-only: samples `/api/diag` twice and reports what the app is writing, and how often. For "why are the NAS disks never idle". |
+| `tools/import_config.py`      | Headless version of the wizard: moves an old `printer.config.json` into the database. |
+| `tools/setup_cloud.py`        | Interactive Bambu Cloud login → stores an auth token in the database.  |
 | `tools/setup_power.py`        | Verifies Tapo plug connectivity and credentials.                        |
 | `tools/test_mqtt_local.py`    | Standalone check that local MQTT works against the printer.             |
 | `tools/capture_sample.py`     | Captures a real report to `samples/sample_report.json` for offline parser testing. |
@@ -516,91 +567,90 @@ Design constraints that shaped these choices:
 | **`deploy/`**                 |                                                                         |
 | `deploy/start.sh`             | Idempotent POSIX launcher (pidfile + `kill -0`), supports a `restart` arg. |
 | `deploy/DEPLOY.md`            | Step-by-step NAS deployment notes.                                      |
-| `deploy/schema_and_user.sql`  | Creates the MariaDB database, tables and app user.                     |
-| `deploy/sqlite_to_mariadb.py` | One-shot migration of a local sqlite DB into MariaDB.                  |
+| `deploy/schema_and_user.sql`  | Creates the database and app user. Works as-is on MariaDB and MySQL 8. |
+| `deploy/sqlite_to_mariadb.py` | One-shot migration of a local sqlite DB into whichever server is configured. |
 | `deploy/recalc_print_energy.py` | Backfills/recomputes per-print energy after pricing changes.         |
 
 ---
 
 ## Configuration
 
-Everything lives in **`printer.config.json`** (kept out of version control — it holds
-secrets). To get started, copy the template and fill it in:
+There is **no config file**. Everything the app knows is a row in the database,
+edited from the **Settings page** (the gear, top right) — printer, costs,
+filament prices, thresholds, intervals, feature gates, and the Tapo / Bambu
+Cloud credentials.
 
-```bash
-cp printer.config.example.json printer.config.json
-```
-
-Structure, with placeholders:
+The one exception is the database connection itself: the app has to read it
+before it can read anything else. That is seven keys, and they live in
+**`instance/db.json`**, which the setup wizard writes and nothing else touches:
 
 ```jsonc
 {
-  "ip": "192.168.x.x",            // printer LAN IP
-  "access_code": "········",       // printer LAN Access Code (Settings → Network)
-  "serial": "········",            // printer serial, used to build MQTT topics
-  "model": "X2D",
-
-  "power": {                       // Tapo smart plug (optional)
-    "enabled": true,
-    "model": "p110",
-    "host": "192.168.x.x",         // plug IP
-    "email": "tapo-account@…",
-    "password": "········",
-    "poll_sec": 20
-  },
-
-  "cost": {
-    "currency": "€",
-    "price_per_kwh": 0.30
-  },
-
-  "filament": {                    // brand × material price matrix (€/kg)
-    "bambu": { "PLA": 24.99, "PETG": 27.99, "default": 24.99 },
-    "other": { "PLA": 14.50, "PETG": 16.90, "default": 14.50 },
-    "default_per_kg": 20.0,
-    "per_slot": {},                // optional overrides, keyed by AMS slot
-    "per_filament_id": {},         // …by slicer filament id
-    "per_type": {},                // …by material type
-
-    "prices_from_orders": true,    // price Bambu spools from your own invoices
-                                   //   (list price per SKU) instead of the
-                                   //   bambu/other matrix above; false = off
-    "low_pct": 15,                 // at/below this %, a spool is flagged "Low"
-    "store_region": "eu",          // eu | us | uk | jp | global (reorder links)
-    "color_names": {               // adds to / corrects the built-in table
-      "A00-N04": "Cocoa Brown"     //   key = the spool's tray_id_name code
-    }
-  },
-
-  "storage": {
-    "backend": "sqlite",           // "sqlite" for dev, "mariadb" on the NAS
-    "sqlite_path": "telemetry.db",
-    "sample_interval_sec": 20,     // how often a telemetry row is written
-    "retention_days": 30,          // purge_worker deletes older rows
-    "auto_tail_min": 10,           // in Auto mode, keep recording this long after a print
-    "mariadb": {
-      "host": "127.0.0.1", "port": 3306,
-      "user": "bambu", "password": "········", "database": "bambu_monitor"
-    }
-  },
-
-  "cloud": {                       // Bambu Cloud enrichment (optional)
-    "enabled": true,
-    "email": "bambu-account@…",
-    "password": "········",
-    "token": "<filled in by setup_cloud.py>",
-    "poll_min": 10
+  "backend": "mariadb",            // or "sqlite"
+  "mariadb": {
+    "host": "127.0.0.1", "port": 3306,
+    "user": "bambu", "password": "········", "database": "bambu_monitor"
   }
 }
 ```
 
-Notes:
+It is written atomically and chmod 600 — it holds a database password. A
+relative `sqlite_path` resolves against the app folder, so the directory the
+service happens to start in cannot decide which database is opened. Not
+committed.
+
+### First run
+
+Start the app with no `instance/db.json` and it serves the **setup wizard** on
+the same port instead of the dashboard, in five steps:
+
+| | asks for | |
+|--|--|--|
+| 1 | Database | MariaDB or MySQL host/user/password/name, or SQLite. **Test connection** actually opens it — and creates a table, because a read-only grant passes a plain connect — then reports which server answered, since choosing MariaDB and reaching MySQL (or the reverse) works but is worth knowing. |
+| 2 | Printer | IP, serial, access code. **Test printer** opens the same MQTT connection the monitor will. |
+| 3 | Plug, cloud & camera | All optional, all skippable. |
+| 4 | Costs & filament | Seeded with Bambu's list prices rather than zero, so a fresh install does not price every print at 0.00. |
+| 5 | Recording & safety | Sample interval, retention, and the two feature gates (off unless you have a reason). |
+
+Nothing is written until the last page: field validation first (it costs
+nothing and touches nothing), then the connection test, then both halves at
+once. A typo on step 4 cannot leave a half-configured app, and a connection
+that has not answered is never saved.
+
+Finishing writes `instance/db.json`, stores everything else in the database,
+and re-execs the process so it starts normally. Re-run it later with
+`python app.py --setup` — it comes back prefilled, with secrets shown only as
+"set".
+
+The wizard's field list is generated from `settings_schema.py`, and a test
+fails if any schema group is not reachable from some step. A setting added to
+the schema appears in the wizard without anyone remembering to list it.
+
+### Upgrading from printer.config.json
+
+The old file is read once, to fill the wizard in — including the credentials,
+so nothing is retyped. On finish its contents move into the database and the
+file is renamed to `printer.config.json.imported` (renamed, not deleted: it
+holds passwords that may exist nowhere else). Nothing reads it after that.
+
+Headless equivalent, for an upgrade over SSH:
+
+```bash
+python tools/import_config.py            # show what would happen
+python tools/import_config.py --write    # do it
+```
+
+### Notes
+
 - **The listening port** defaults to `8770`; override with the `BAMBU_PORT`
-  environment variable.
-- `cloud.token` is populated by running `setup_cloud.py` so the password isn't
-  re-sent on every start.
-- To turn off a subsystem, set its `enabled` to `false` — the corresponding worker
-  thread simply isn't started.
+  environment variable. It is not a setting — the wizard has to be served
+  somewhere before there are settings.
+- `cloud.token` is filled in automatically after a successful sign-in, so the
+  password is not re-sent on every start.
+- To turn off a subsystem, untick its **enabled** box — the corresponding
+  worker thread simply isn't started. Enabled but not yet filled in is a state
+  the Settings page can reach, and each worker says what is missing rather than
+  dying in a thread nobody is watching.
 
 ---
 
@@ -610,13 +660,11 @@ Notes:
 # 1. dependencies
 pip install -r requirements.txt
 
-# 2. configure
-cp printer.config.example.json printer.config.json   # then edit it
-#    backend "sqlite" (the default) needs nothing else; power/cloud are off by default
-
-# 3. run
+# 2. run
 python app.py
-#    → serves http://localhost:8770, connects to the printer, creates telemetry.db
+#    → no instance/db.json yet, so this serves the setup wizard on :8770
+#    → answer it (SQLite needs nothing but a filename), and the app restarts
+#      itself, connects to the printer and creates telemetry.db
 ```
 
 Handy checks before/while developing:
@@ -638,7 +686,7 @@ Full detail is in [`deploy/DEPLOY.md`](deploy/DEPLOY.md); the essentials:
 
 1. **Code** lives in `/volume1/apps/bambu-monitor/` with a Python virtualenv at
    `venv/` (the launcher runs `venv/bin/python3`).
-2. **Database:** run `deploy/schema_and_user.sql` on the NAS MariaDB to create the
+2. **Database:** run `deploy/schema_and_user.sql` on the NAS MariaDB (or MySQL) to create the
    `bambu_monitor` database and app user, then set `storage.backend` to `"mariadb"`
    in the config. To carry local data over, run `deploy/sqlite_to_mariadb.py`.
 3. **Autostart:** in *Control Panel → Task Scheduler*, add
@@ -674,7 +722,7 @@ a single static binary — converts it to browser-native **WebRTC/MSE** (H.264
 passthrough, no transcoding, so it's light on the NAS CPU).
 
 `app.py` owns the relay end-to-end: it generates `go2rtc.yaml` from
-`printer.config.json` (so the access code never lives in a second file) and
+the database (so the access code never lives in a second place) and
 launches + supervises the go2rtc process. The dashboard's Live view tab embeds
 go2rtc's player, and only connects **while the tab is open** so the camera isn't
 streamed 24/7.
@@ -697,7 +745,7 @@ Printer ──RTSPS:322 (H.264)──► go2rtc ──WebRTC/MSE:1984──► L
 2. **Get the relay binary:** download the `go2rtc` build for your NAS architecture
    into `go2rtc/` (ARM64 Synology → `go2rtc_linux_arm64`; Intel → `_linux_amd64`).
    `app.py` `chmod +x`'s it on start.
-3. **Enable it in config** — the `camera` block in `printer.config.json`:
+3. **Enable it** — Settings → Camera (or step 3 of the wizard):
    ```json
    "camera": { "enabled": true, "src": "bambu", "rtsp_port": 322,
                "api_port": 1984, "webrtc_port": 8555, "bin": "go2rtc/go2rtc_linux_arm64" }
@@ -778,9 +826,11 @@ printer (and re-enable LAN Mode Live View, which a reboot can revert).
 
 ## Storage & database schema
 
-One `Storage` object; the backend is chosen by config, so identical code runs on
-sqlite (dev) and MariaDB (prod). Missing columns are added on startup via a
-migration list, so the schema can evolve without manual `ALTER`s.
+One `Storage` object; the backend is chosen by the connection file, so identical
+code runs on **sqlite** (dev), **MariaDB** and **MySQL**. See
+[Adding another backend](#adding-another-backend) for what a fourth would cost.
+Missing columns are added on startup via a migration list, so the schema can
+evolve without manual `ALTER`s.
 
 - **`telemetry`** — flat time-series, one row every `sample_interval_sec`:
   `ts, gcode_state, percent, layer, total_layers, bed_cur, bed_tgt, noz0, noz1,
@@ -823,6 +873,108 @@ migration list, so the schema can evolve without manual `ALTER`s.
   acknowledgements, and per-task maintenance intervals / reset marks).
 
 `purge_worker` trims `telemetry` beyond `retention_days`.
+
+### Keeping an idle app quiet
+
+The NAS's disks can only hibernate if nothing is writing to them, so **an idle
+printer must produce no writes at all**. That is not automatic: `on_message`
+runs about once a second, and anything called from it inherits that rate.
+
+Two things enforce it. `_maybe_record` gates telemetry behind the recording
+mode — Auto writes only during a print plus a tail — and `_observe_filaments`
+writes a tray only when its identity actually changed. `_cost_block` is cached,
+because it reads the whole `prints` table and was being called per frame for a
+figure that changes at most once a minute.
+
+`GET /api/diag` reports every SQL statement the app has run, by verb and table,
+alongside the MQTT frame count — so "what is it doing to the disk" is a
+question the app can answer about itself:
+
+```bash
+python tools/why_disk_busy.py 60        # samples it twice, prints rates
+```
+
+With the printer idle it should say `WRITES in the window: 0`. If it does not,
+the offending statement is named, and a rate close to the frame rate means
+something is writing once per report, which is always a bug.
+
+> This was worth building: two black PLA spools produce the same filament
+> identity, but the printer reports their colour code with different padding
+> (`A00-K00` and `A00-K0`). Each looked like a change to the other, so both
+> wrote on every frame — about 100 `UPDATE filaments` a minute with nothing
+> printing. Invisible from the outside, and obvious in one line of `/api/diag`.
+
+### Adding another backend
+
+`storage.py` has ~42 `self.backend` branches, which makes a third backend look
+like a bigger job than it is. Three different questions are hiding behind that
+one test, and only the third has anything to do with SQL:
+
+| what the branch decides | how many | matters for a new backend? |
+|---|---|---|
+| **lifecycle** — sqlite reuses one connection and commits; a server opens one per call and closes it | 25 commits + 38 closes | no. Same for every server backend. |
+| **row shape** — sqlite has `row_factory`, so rows are already dicts; PyMySQL returns tuples that get zipped with the column list | 7 | one line per driver |
+| **dialect** — the only genuinely database-specific SQL | **5** | yes, and that is the whole list |
+
+The five live in one table, `DIALECTS` at
+[storage.py:207](storage.py#L207) — one row per backend, and adding a backend is
+filling one in:
+
+| key | sqlite | MariaDB / MySQL | used at |
+|--|--|--|--|
+| `auto` | `AUTOINCREMENT` | `AUTO_INCREMENT` | [storage.py:235](storage.py#L235) |
+| `blob` | `BLOB` | `LONGBLOB` | [storage.py:236](storage.py#L236) |
+| `inline_index` | separate `CREATE INDEX` after | inline in `CREATE TABLE` | [storage.py:283](storage.py#L283) |
+| `columns` | `PRAGMA table_info` | `information_schema.COLUMNS` | [storage.py:374](storage.py#L374) |
+| `upsert` | `REPLACE INTO` | `REPLACE INTO` | [storage.py:844](storage.py#L844), [storage.py:855](storage.py#L855) |
+
+A sixth key, `server`, is not about SQL: it says whether the backend is reached
+over TCP with a connection per call (and so needs no explicit commit), which is
+the lifecycle question, and it is what the connect branch at
+[storage.py:237](storage.py#L237) tests.
+
+Two things make this smaller than it looks. There is **no
+`ON DUPLICATE KEY UPDATE` anywhere** — the `prints` and `filaments` upserts are
+hand-rolled UPDATE-then-INSERT, which is portable — so only those two
+`REPLACE INTO` statements are dialect-locked. And the whole schema uses **six
+column types**: `FLOAT`, `DOUBLE`, `TEXT`, `INTEGER`, `VARCHAR(n)`, `LONGBLOB`.
+No booleans, no date functions, no `GROUP_CONCAT`, no quoted identifiers, one
+`LIMIT`.
+
+So, concretely:
+
+- **MySQL** — **done.** PyMySQL *is* the MySQL driver; MariaDB is the fork, and
+  all five dialect answers are identical, so MySQL runs byte-for-byte the same
+  SQL MariaDB does. That is what the test asserts: it captures every statement
+  `Storage` emits under each backend and requires the two lists to match, since
+  "the same SQL as the one that works" is a stronger claim than any amount of
+  reasoning about compatibility. MySQL 8's default `caching_sha2_password` needs
+  the `cryptography` package, which is in `requirements.txt`, and
+  `bootstrap.test()` recognises that failure and says so — including the
+  `mysql_native_password` way out for anyone who would rather not install it.
+- **PostgreSQL** — bounded, but real. Six changes: the psycopg driver and its
+  dict cursor, `SERIAL PRIMARY KEY` in place of `INTEGER PRIMARY KEY
+  AUTO_INCREMENT` (so `_auto` alone is not enough — the whole column spec
+  differs), `BYTEA`, a separate `CREATE INDEX`, `INSERT … ON CONFLICT DO UPDATE`
+  for those two statements, and a slightly different information_schema query.
+  `rowcount` is a bonus: Postgres counts matched rows natively, so the
+  `CLIENT.FOUND_ROWS` workaround at [storage.py:253](storage.py#L253) is not
+  needed. The work that is **not** visible in a grep is type strictness —
+  sqlite and MySQL accept `None` or `""` into a `FLOAT`, Postgres does not — and
+  finding those needs the test suite run against a live server, not reasoning
+  about the code.
+
+Adding one now means a row in `DIALECTS`, a connect function, and a name in
+`bootstrap.BACKENDS` — a test fails if those two lists disagree, and another
+fails if a schema identifier turns out to be a reserved word.
+
+Half of that tidy-up is now done: `DIALECTS` in
+[storage.py](storage.py) holds the five SQL decisions, and the two that are
+genuinely about syntax read from it. The other half — a `_finish(conn, cur)` for
+the lifecycle and a `_rows(cur)` for the row shape — is **not** done, because
+those 37 branches test `== "sqlite"` and so already do the right thing for any
+server backend. They are churn, not correctness, and are only worth doing if a
+backend ever arrives that is neither.
 
 ---
 
@@ -1067,7 +1219,8 @@ A few behaviours are non-obvious because the printer's raw data is messy:
 | Raw printer data box is empty                       | It needs a *full* report; it fills once the printer sends a pushall/full frame. |
 | Dashboard loads but stays empty / no telemetry      | Check `app.log` on the NAS for a Python traceback; confirm the printer IP/Access Code and that only one instance is running. |
 | MQTT keeps connecting/disconnecting                 | Two app instances fighting over the printer's single `bblp` login — ensure the watchdog didn't spawn a duplicate (`start.sh` guards against this). |
-| `#1054 Unknown column …` (MariaDB)                  | Backend is on MariaDB but the schema is behind; the column-migration runs on startup — restart the app, or check the config didn't get flipped to sqlite. |
+| `#1054 Unknown column …` (MariaDB/MySQL)            | Backend is on a server but the schema is behind; the column-migration runs on startup — restart the app, or check the connection didn't get flipped to sqlite. |
+| `caching_sha2_password cannot be loaded` (MySQL 8)  | PyMySQL needs the `cryptography` package for MySQL 8's default auth plugin: `./venv/bin/python3 -m pip install -r requirements.txt`. Or give the user the older plugin — see the note in `deploy/schema_and_user.sql`. |
 | Garbled `°`/`€`/umlauts after editing on Windows    | A file was round-tripped through PowerShell; re-edit with a UTF-8-aware tool. |
 | A dashboard change doesn't appear after copying it over | The page is served `no-store`, so this should not happen — but to be sure, hover the SN line in the header or check the console: both report when the served `dashboard.html` was last written. `GET /api/version` returns the same timestamp. |
 | Cloud login fails                                   | Re-run `tools/setup_cloud.py` to refresh the stored token.                  |
@@ -1085,7 +1238,7 @@ A few behaviours are non-obvious because the printer's raw data is messy:
 | Deleting a print says **"print is still running"**  | Intentional: the job is active, its energy total is still accumulating and it would be re-created anyway. Delete it once it has finished. |
 | Deleted prints changed the **Statistics/Maintenance** figures | Expected — both aggregate over the `prints` table, so removing a row also removes its hours, energy and filament from the totals. |
 | Live view spins / no picture                        | Printer serves **one** camera client at a time — close the Handy app / Bambu Studio / other tabs; if wedged, power-cycle the printer and re-enable LAN Mode Live View. Confirm with the `curl … stream.mp4` test. See [Live view](#live-view-camera). |
-| Live view tab missing                               | `camera.enabled` is false, or `/api/camera` reports disabled. Set it in `printer.config.json` and restart. |
+| Live view tab missing                               | `camera.enabled` is false, or `/api/camera` reports disabled. Tick it under Settings → Camera and restart. |
 | Print controls do nothing / "printer not connected" | Recording mode is **Off**, which drops the MQTT stream — controls need a live connection. Switch to Auto/On. |
 | A fan slider moves the **wrong** fan                | The `M106` fan mapping (`P1/P2/P3`) can differ per model. Adjust `_FAN_GCODE` in `app.py`. |
 | **HMS 0500_0500_0001_0007** after a control      | *"MQTT Command verification failed"* — the firmware rejected the command; nothing was written and nothing is damaged. Acknowledge the warning in the header. Slot assignment and the gcode-based controls (bed/chamber setpoints, fan sliders) ship **off** for this reason; see [MQTT command verification](#mqtt-command-verification). |
@@ -1107,7 +1260,8 @@ enable it at your own discretion and risk.
 
 Provided **as is**, with no warranty (see [LICENSE](LICENSE)). You are responsible
 for your own credentials and deployment. Configuration holds credentials in
-plaintext (`printer.config.json`, which is git-ignored); this is fine for a trusted
+plaintext (in the database, and the database password in `instance/db.json`,
+which is chmod 600 and git-ignored); this is fine for a trusted
 LAN/NAS deployment but the app should **not be exposed to the public internet**.
 
 ## License

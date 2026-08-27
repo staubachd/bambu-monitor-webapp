@@ -7,7 +7,7 @@ code, self-signed certificate). The sliced 3MF that a print came from lives
 somewhere on that storage; inside it, Metadata/slice_info.config and
 Metadata/plate_N.gcode carry the exact filament usage in grams.
 
-    python explore_ftps.py            # uses printer.config.json
+    python explore_ftps.py            # uses the configured printer
 """
 import ftplib
 import json
@@ -16,8 +16,13 @@ import ssl
 import sys
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root (tools/ is one level down)
-cfg = json.load(open(os.path.join(HERE, "printer.config.json"), encoding="utf-8"))
-HOST, CODE = cfg["ip"], cfg["access_code"]
+sys.path.insert(0, HERE)
+import config_store  # noqa: E402
+
+_store, cfg = config_store.open_live()
+HOST, CODE = cfg.get("ip"), cfg.get("access_code")
+if not (HOST and CODE):
+    sys.exit("no printer configured - run `python app.py --setup`")
 
 
 class _ReusedSocket(ssl.SSLSocket):

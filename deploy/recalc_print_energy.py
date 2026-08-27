@@ -26,14 +26,13 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
 import storage  # noqa: E402
 
-cfg = json.load(open(os.path.join(HERE, "printer.config.json"), encoding="utf-8"))
-scfg = dict(cfg.get("storage", {}))
-if scfg.get("backend", "sqlite") == "sqlite" and not os.path.isabs(scfg.get("sqlite_path", "")):
-    scfg["sqlite_path"] = os.path.join(HERE, scfg.get("sqlite_path", "telemetry.db"))
-price = float((cfg.get("cost") or {}).get("price_per_kwh", 0) or 0)
-cur_sym = (cfg.get("cost") or {}).get("currency", "")
+import config_store  # noqa: E402
 
-s = storage.Storage(scfg)
+store, cfg = config_store.open_live()
+price = float(cfg.get("cost.price_per_kwh", 0) or 0)
+cur_sym = cfg.get("cost.currency", "")
+
+s = store
 args = [a for a in sys.argv[1:]]
 prints = s.recent_prints(limit=500)
 if not prints:

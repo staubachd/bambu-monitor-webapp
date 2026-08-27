@@ -5,7 +5,9 @@ Configure + test the Tapo smart plug (P110 / P110M / P115) used for power monito
     python setup_power.py
 
 Asks for the plug's IP and your TP-Link account details, verifies it can actually
-talk to the plug, and only then writes the settings into printer.config.json.
+talk to the plug, and only then stores the settings. Everything it writes can
+also be typed on the Settings page - this exists because it proves the plug
+answers before storing anything.
 The password is typed hidden and never echoed.
 
 Note: the TP-Link *account* credentials are required even though the connection
@@ -19,7 +21,7 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root (tools/ is one level down)
-CFG_PATH = os.path.join(HERE, "printer.config.json")
+sys.path.insert(0, HERE)
 
 try:
     from tapo import ApiClient
@@ -27,9 +29,10 @@ except ImportError:
     sys.exit("The 'tapo' package is missing. Install it first:\n"
              "   python -m pip install tapo")
 
-with open(CFG_PATH, encoding="utf-8") as fh:
-    cfg = json.load(fh)
-p = cfg.setdefault("power", {})
+import config_store  # noqa: E402
+
+_store, cfg = config_store.open_live()
+p = cfg.section("power")
 
 host = input(f"Tapo plug IP address [{p.get('host', '')}]: ").strip() or p.get("host", "")
 email = input(f"TP-Link account email [{p.get('email', '')}]: ").strip() or p.get("email", "")
@@ -61,10 +64,9 @@ except Exception as e:
              "     Check the IP, that the plug is on this network, and that the\n"
              "     email/password are the TP-Link account that owns the plug.")
 
-p.update(enabled=True, model=model, host=host, email=email,
-         password=password, poll_sec=int(p.get("poll_sec", 20)))
-with open(CFG_PATH, "w", encoding="utf-8") as fh:
-    json.dump(cfg, fh, indent=2)
+cfg.set_many({"power.enabled": True, "power.model": model, "power.host": host,
+              "power.email": email, "power.password": password,
+              "power.poll_sec": int(p.get("poll_sec", 20))})
 
-print("\n[ok] saved to printer.config.json and enabled.")
+print("\n[ok] stored in the database and enabled (Settings > Power).")
 print("     Restart the app to start recording power.")

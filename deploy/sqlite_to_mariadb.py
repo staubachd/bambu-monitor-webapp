@@ -22,12 +22,17 @@ import sys
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
 
-cfg = json.load(open(os.path.join(HERE, "printer.config.json"), encoding="utf-8"))
-scfg = cfg.get("storage", {})
-m = scfg.get("mariadb") or {}
-sqlite_path = scfg.get("sqlite_path", "telemetry.db")
-if not os.path.isabs(sqlite_path):
-    sqlite_path = os.path.join(HERE, sqlite_path)
+import bootstrap  # noqa: E402
+
+# This one is special: it copies FROM sqlite TO a server, so it needs both, and
+# instance/db.json only ever names one of them. The destination is the
+# configured connection; the source is the sqlite file beside the app.
+scfg = bootstrap.load() or {}
+m = bootstrap.server_block(scfg)
+if scfg.get("backend") not in bootstrap.SERVER_BACKENDS or not m:
+    raise SystemExit("[migrate] the app is not configured for MariaDB or MySQL - "
+                     "run `python app.py --setup` and choose one first")
+sqlite_path = os.path.join(HERE, "telemetry.db")
 
 if not os.path.exists(sqlite_path):
     sys.exit(f"no sqlite file at {sqlite_path} - nothing to migrate")

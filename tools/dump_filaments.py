@@ -29,12 +29,9 @@ sys.path.insert(0, HERE)
 import filament_catalog as fc           # noqa: E402
 from storage import Storage             # noqa: E402
 
-with open(os.path.join(HERE, "printer.config.json"), encoding="utf-8") as fh:
-    cfg = json.load(fh)
-scfg = cfg.get("storage", {"backend": "sqlite"})
-if scfg.get("backend", "sqlite") == "sqlite" and not os.path.isabs(scfg.get("sqlite_path", "telemetry.db")):
-    scfg = {**scfg, "sqlite_path": os.path.join(HERE, scfg.get("sqlite_path", "telemetry.db"))}
-store = Storage(scfg)
+import config_store  # noqa: E402
+
+store, cfg = config_store.open_live()
 
 cat = {f["fkey"]: f for f in store.all_filaments()}
 used: dict = {}

@@ -3,7 +3,13 @@
 Bambu X2D Monitor - single-process app: a background MQTT thread keeps the
 latest normalized printer state, and Flask serves a live dashboard.
 
-    python app.py            # reads printer.config.json, serves http://localhost:8770
+    python app.py            # serves http://localhost:8770
+    python app.py --setup    # re-run the setup wizard
+
+Configuration lives in the database, edited from the Settings page. The one
+exception is the database connection itself, which is in instance/db.json - see
+bootstrap.py. With no connection on file the app serves the setup wizard instead
+of the dashboard.
 
 Endpoints:
     /            dashboard page
@@ -19,6 +25,7 @@ import queue
 import re
 import subprocess
 import ssl
+import sys
 import threading
 import time
 
@@ -27,28 +34,49 @@ from datetime import datetime, timedelta, timezone
 import paho.mqtt.client as mqtt
 from flask import Flask, Response, jsonify, request, send_file
 
+import bootstrap
 import filament_catalog
+import config_store
+import settings_schema
 from bambu_state import parse_report
 from storage import Storage
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.path.join(HERE, "printer.config.json")
 PORT = int(os.environ.get("BAMBU_PORT", "8770"))
 
-with open(CONFIG_PATH, encoding="utf-8") as fh:
-    CFG = json.load(fh)
+# Nothing below this point can run without a database, and the wizard is what
+# produces one. It serves on the same port, so an unconfigured app is not a
+# blank page but the question it needs answered; finishing re-execs this file.
+if bootstrap.load() is None or "--setup" in sys.argv:
+    import setup_wizard
+    setup_wizard.serve(PORT)
+    bootstrap.restart()
 
-REPORT_TOPIC = f"device/{CFG['serial']}/report"
-REQUEST_TOPIC = f"device/{CFG['serial']}/request"
+# the one thing that cannot come from the database: the database
+STORE_CFG = bootstrap.load()
+store = Storage(STORE_CFG)
+
+# Every setting is a row in that database. Sections handed out below are LIVE
+# views, so an edit applies without a restart and without every call site
+# changing. Nothing may read CFG before the attach - there is no file layer
+# underneath it any more, so before this line the config is only defaults.
+# a write to prints is the only thing that can change what printing has cost,
+# so that is what drops the cached figure - no call site has to remember
+store.on_write = lambda table: _cost_dirty() if table == "prints" else None
+
+CONFIG = config_store.ConfigStore()
+CONFIG.attach(store)
+CFG = CONFIG.section()
+
+# The serial is restart-only (settings_schema live=False), which is exactly why
+# these can be constants.
+REPORT_TOPIC = f"device/{CFG.get('serial', '')}/report"
+REQUEST_TOPIC = f"device/{CFG.get('serial', '')}/request"
 PUSHALL = json.dumps({"pushing": {"sequence_id": "0", "command": "pushall"}})
 GET_VERSION = json.dumps({"info": {"sequence_id": "0", "command": "get_version"}})
 
-STORE_CFG = CFG.get("storage", {"backend": "sqlite"})
-# resolve a relative sqlite path against this dir so cwd doesn't matter
-if STORE_CFG.get("backend", "sqlite") == "sqlite" and not os.path.isabs(STORE_CFG.get("sqlite_path", "telemetry.db")):
-    STORE_CFG = {**STORE_CFG, "sqlite_path": os.path.join(HERE, STORE_CFG.get("sqlite_path", "telemetry.db"))}
-SAMPLE_INTERVAL = float(STORE_CFG.get("sample_interval_sec", 20))
-store = Storage(STORE_CFG)
+def SAMPLE_INTERVAL():
+    return float(CFG.get("storage", {}).get("sample_interval_sec", 20))
 _acked = store.acked_keys()  # set of (code, ts) the user has dismissed
 
 # Recording mode gates DB writes only; the live dashboard updates regardless.
@@ -58,7 +86,8 @@ _acked = store.acked_keys()  # set of (code, ts) the user has dismissed
 #          leaving the NAS disks idle the rest of the time so they can hibernate
 RECORD_MODES = ("auto", "on", "off")
 ACTIVE_STATES = {"RUNNING", "PREPARE", "PAUSE", "SLICING"}
-AUTO_TAIL_SEC = float(STORE_CFG.get("auto_tail_min", 10)) * 60
+def AUTO_TAIL_SEC():
+    return float(CFG.get("storage", {}).get("auto_tail_min", 10)) * 60
 
 # Maintenance schedule for the Bambu Lab X2D. Bambu's official intervals are
 # calendar-based by usage tier (regular use ~1-5 h/day: X/Y axes every 2 months,
@@ -116,7 +145,7 @@ def _should_record(state: dict) -> bool:
         _auto["last_active"] = now
         return True
     last = _auto["last_active"]
-    return bool(last) and (now - last) <= AUTO_TAIL_SEC
+    return bool(last) and (now - last) <= AUTO_TAIL_SEC()
 
 
 def _annotate_acks(state: dict) -> dict:
@@ -125,6 +154,12 @@ def _annotate_acks(state: dict) -> dict:
     return state
 
 # ---- shared state ----------------------------------------------------------
+# How many reports the printer has pushed since start. The frame rate is the
+# denominator for everything else the app does: anything called from on_message
+# happens this often, which is easy to forget when writing it.
+_frames = {"n": 0}
+_started_at = time.time()
+
 _state_lock = threading.Lock()
 _state: dict = {"connected": False, "recording_mode": _rec_mode,
                 "recording_active": False, "stream_enabled": _rec_mode != "off",
@@ -163,9 +198,11 @@ COVERED_RAW_KEYS = _covered_raw_keys()
 # latest reading from the smart plug (Tapo P110/P110M), polled independently
 _power: dict = {"watts": None, "today_wh": None, "month_wh": None,
                 "ts": 0.0, "error": None}
-PWR_CFG = CFG.get("power", {}) or {}
-COST_CFG = CFG.get("cost", {}) or {}
-CAM_CFG = CFG.get("camera", {}) or {}
+# live sections, not snapshots: an edit on the Settings page has to reach
+# code that bound these at import
+PWR_CFG = CONFIG.section("power")
+COST_CFG = CONFIG.section("cost")
+CAM_CFG = CONFIG.section("camera")
 # energy consumed by the CURRENT print, integrated from the plug while a job is
 # active. Deliberately not derived from the chart range, which the user changes.
 _job_energy = {"task_id": None, "wh": 0.0, "last_ts": None}
@@ -385,7 +422,33 @@ def _grams(row):
     return m if m is not None else row.get("filament_g")
 
 
+# _cost_block reads the whole prints table and sorts it. It is called from
+# on_message, so it ran at the printer's frame rate - several times a second,
+# for a figure that changes when a print is written, which is at most once a
+# minute. Cached, and invalidated by the writes that can change it.
+_cost_cache = {"at": 0.0, "day": None, "block": None}
+_COST_TTL = 20.0
+
+
+def _cost_dirty() -> None:
+    """Call after anything that changes what a print cost."""
+    _cost_cache["block"] = None
+
+
 def _cost_block() -> dict:
+    # the calendar windows move on their own, so a cached block also expires
+    # when the day rolls over, not only when a row changes
+    today = datetime.now().toordinal()
+    cached = _cost_cache["block"]
+    if (cached is not None and _cost_cache["day"] == today
+            and (time.time() - _cost_cache["at"]) < _COST_TTL):
+        return cached
+    block = _cost_block_uncached()
+    _cost_cache.update(at=time.time(), day=today, block=block)
+    return block
+
+
+def _cost_block_uncached() -> dict:
     """Power + material, aggregated per calendar window from the prints table.
 
     Both are per-print so they pair up: 'what printing cost me today/week/month'.
@@ -604,6 +667,7 @@ def on_connect(client, userdata, flags, rc, *_):
 
 
 def on_message(client, userdata, msg):
+    _frames["n"] += 1
     try:
         raw = json.loads(msg.payload)
     except ValueError:
@@ -632,7 +696,7 @@ def on_message(client, userdata, msg):
     state["stream_enabled"] = _mqtt_enabled.is_set()
     # which command families this firmware will accept, so the UI can offer only
     # the controls that actually work
-    state["controls"] = {"gcode": CTRL_GCODE}
+    state["controls"] = {"gcode": CTRL_GCODE()}
     state["power"] = dict(_power)
     state["cost"] = _cost_block()
     _track_print(state)
@@ -655,7 +719,7 @@ def _maybe_record(state: dict, allowed: bool) -> None:
     now = time.time()
     cur_state = (state.get("job") or {}).get("state")
     changed = cur_state != _last_record["state"]
-    if changed or (now - _last_record["ts"]) >= SAMPLE_INTERVAL:
+    if changed or (now - _last_record["ts"]) >= SAMPLE_INTERVAL():
         try:
             store.record(state)
             _last_record["ts"] = now
@@ -684,11 +748,24 @@ def power_worker():
         print("[power] 'tapo' not installed; power monitoring disabled")
         return
 
+    # Enabled but not filled in is a state that exists now: the Settings page
+    # can switch the plug on before the credentials are typed. Say so once and
+    # stop, rather than raising in a background thread nobody is watching.
+    host, email, pw = (PWR_CFG.get("host"), PWR_CFG.get("email"),
+                       PWR_CFG.get("password"))
+    if not (host and email and pw):
+        missing = [n for n, v in (("Plug IP", host), ("Tapo account", email),
+                                  ("Tapo password", pw)) if not v]
+        print(f"[power] enabled, but {', '.join(missing)} not set - "
+              f"fill it in under Settings > Power")
+        _power.update(error="not configured")
+        return
+
     poll = float(PWR_CFG.get("poll_sec", 20))
     model = PWR_CFG.get("model", "p110")
 
     async def loop():
-        client = ApiClient(PWR_CFG["email"], PWR_CFG["password"])
+        client = ApiClient(email, pw)
         dev = None
         # Log only on state change, never on every poll: a flaky plug must not
         # write a line every 20s, which would wake the NAS disks and defeat the
@@ -701,14 +778,14 @@ def power_worker():
                 continue
             try:
                 if dev is None:
-                    dev = await getattr(client, model)(PWR_CFG["host"])
+                    dev = await getattr(client, model)(host)
                 cp = await dev.get_current_power()
                 eu = await dev.get_energy_usage()
                 _power.update(watts=cp.current_power, today_wh=eu.today_energy,
                               month_wh=eu.month_energy, ts=time.time(), error=None)
                 _accumulate_job_energy(cp.current_power)
                 if not started:
-                    print(f"[power] connected to {model} at {PWR_CFG['host']}")
+                    print(f"[power] connected to {model} at {host}")
                     started = True
                 elif last_err is not None:
                     print(f"[power] {model} reachable again")
@@ -725,14 +802,18 @@ def power_worker():
     asyncio.run(loop())
 
 
-FIL_CFG = CFG.get("filament", {}) or {}
-CLOUD_CFG = CFG.get("cloud", {}) or {}
+FIL_CFG = CONFIG.section("filament")
+CLOUD_CFG = CONFIG.section("cloud")
 
 # Reordering: what counts as "nearly used up", and which regional store to link.
-FIL_LOW_PCT = float(FIL_CFG.get("low_pct", 15))
-FIL_STORE_REGION = FIL_CFG.get("store_region", filament_catalog.DEFAULT_REGION)
-FIL_STORE_HOST = FIL_CFG.get("store_host")          # full host override, optional
-FIL_COLOR_NAMES = FIL_CFG.get("color_names") or {}  # extends/corrects the built-ins
+def FIL_LOW_PCT():
+    return float(FIL_CFG.get("low_pct", 15))
+def FIL_STORE_REGION():
+    return FIL_CFG.get("store_region", filament_catalog.DEFAULT_REGION)
+def FIL_STORE_HOST():
+    return FIL_CFG.get("store_host") or None   # full host override, optional
+def FIL_COLOR_NAMES():
+    return FIL_CFG.get("color_names") or {}   # extends/corrects the built-ins
 # Colour names read off imported invoices - Bambu's own wording, so they beat the
 # built-in guess table. Config still wins, as the last word is always the user's.
 try:    # keys are canonicalised on load, so entries written before norm_code
@@ -743,12 +824,13 @@ except Exception:
 
 
 def _color_overrides() -> dict:
-    return {**_LEARNED_COLORS, **FIL_COLOR_NAMES}
+    return {**_LEARNED_COLORS, **FIL_COLOR_NAMES()}
 
 
 # Per-kg prices taken from your own orders, so the config matrix stops being a
 # number you have to maintain by hand. Keyed by Bambu SKU (GFA00).
-PRICES_FROM_ORDERS = bool(FIL_CFG.get("prices_from_orders", True))
+def PRICES_FROM_ORDERS():
+    return bool(FIL_CFG.get("prices_from_orders", True))
 _ORDER_PRICES: dict = {}
 
 
@@ -845,7 +927,7 @@ def _enrich_ams(state: dict) -> None:
         for tr in trays:
             tr.update(filament_catalog.describe(
                 tr, overrides=_color_overrides(),
-                region=FIL_STORE_REGION, host=FIL_STORE_HOST))
+                region=FIL_STORE_REGION(), host=FIL_STORE_HOST()))
             # What this spool was called on the Filament page. For a spool with
             # no RFID that is the ONLY name it can have; for a Bambu one a name
             # typed in by hand beats the catalogue, which is the same rule the
@@ -861,10 +943,10 @@ def _enrich_ams(state: dict) -> None:
             # sends -1 and an external spool sends 0, and neither means empty -
             # warning on those would cry wolf on every non-Bambu spool.
             tr["low"] = (bool(tr.get("is_bambu")) and pct is not None
-                         and 0 <= pct <= FIL_LOW_PCT)
+                         and 0 <= pct <= FIL_LOW_PCT())
     if ams:
-        ams["low_pct"] = FIL_LOW_PCT
-        ams["can_assign"] = AMS_ASSIGN   # hides the button unless switched on
+        ams["low_pct"] = FIL_LOW_PCT()
+        ams["can_assign"] = AMS_ASSIGN()   # hides the button unless switched on
 
 
 _fil_obs = {}   # fkey -> (identity tuple, ts) of what was last written
@@ -880,12 +962,23 @@ def _observe_filaments(state: dict) -> None:
     """
     now = time.time()
     ams = state.get("ams") or {}
+    done = set()      # one write per identity per frame, not one per tray
     for trays in [u.get("trays") or [] for u in (ams.get("units") or [])] + [ams.get("external") or []]:
         for tr in trays:
             if not tr.get("type"):
                 continue          # empty slot
             fkey = filament_catalog.key(tr.get("filament_id"), tr.get("color"), tr.get("type"))
-            ident = (tr.get("filament_id"), tr.get("code"), tr.get("brand"),
+            # Two spools of the same filament are one identity by definition, and
+            # the printer does not report them identically: two black PLA trays
+            # came back as 'A00-K00' and 'A00-K0', the same code with different
+            # padding. Each then looked like a change to the other, and both
+            # wrote on every frame - about 100 UPDATEs a minute with the printer
+            # sitting idle. norm_code is what the rest of the app compares by.
+            if fkey in done:
+                continue
+            done.add(fkey)
+            ident = (tr.get("filament_id"), filament_catalog.norm_code(tr.get("code")),
+                     tr.get("brand"),
                      filament_catalog.norm_color(tr.get("color")), tr.get("color_name"),
                      tr.get("type"), bool(tr.get("is_bambu")))
             prev = _fil_obs.get(fkey)
@@ -1239,7 +1332,7 @@ def _filament_stats() -> dict:
                    "bought_g": round(bought_g, 1), "spent": round(spent, 2),
                    "orders": len(purchases), "priced": len(_ORDER_PRICES)},
         # SKU -> list price per kg, i.e. what per-print costing now uses
-        "order_prices": dict(_ORDER_PRICES) if PRICES_FROM_ORDERS else {},
+        "order_prices": dict(_ORDER_PRICES) if PRICES_FROM_ORDERS() else {},
         "filaments": out,
         "suggestions": suggest,
         "purchases": purchases,
@@ -1340,7 +1433,7 @@ def _filament_price_per_kg(entry: dict, bambu_map: dict | None = None,
     if genuine is None:
         genuine = bambu_map.get(slot) if bambu_map else None
 
-    if PRICES_FROM_ORDERS:
+    if PRICES_FROM_ORDERS():
         # Which SKU to price by: after a merge, the identity's own - two prints
         # of the same spool that were recorded under different SKUs have to end
         # up at the same price, which is the whole point of merging them.
@@ -1520,6 +1613,13 @@ def cloud_worker():
     it and only the cloud knows. This is history enrichment, not live telemetry,
     so it runs slowly; a finished print kicks it early via _cloud_kick.
     """
+    # same as the plug: enabled without an account is a reachable state now
+    if not (CLOUD_CFG.get("token") or
+            (CLOUD_CFG.get("email") and CLOUD_CFG.get("password"))):
+        print("[cloud] enabled, but no account is set - fill it in under "
+              "Settings > Cloud, or run tools/setup_cloud.py to sign in")
+        return
+
     poll = max(60.0, float(CLOUD_CFG.get("poll_min", 10)) * 60)
     while True:
         try:
@@ -1535,7 +1635,7 @@ def cloud_worker():
 
 def _build_client():
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-    client.username_pw_set("bblp", CFG["access_code"])
+    client.username_pw_set("bblp", CFG.get("access_code") or "")
     client.tls_set(cert_reqs=ssl.CERT_NONE, tls_version=ssl.PROTOCOL_TLS)
     client.tls_insecure_set(True)
     client.on_connect = on_connect
@@ -1551,9 +1651,14 @@ def mqtt_worker():
     global _mqtt_client
     while True:
         _mqtt_enabled.wait()  # blocks (no CPU) while the stream is switched off
+        ip = CFG.get("ip")
+        if not ip:
+            print("[mqtt] no printer address set - Settings > Printer")
+            time.sleep(30)
+            continue
         client = _build_client()
         try:
-            client.connect(CFG["ip"], 8883, keepalive=60)
+            client.connect(ip, 8883, keepalive=60)
             client.loop_start()
             _mqtt_client = client
             print("[mqtt] stream started")
@@ -2113,6 +2218,119 @@ def api_purchase_parse():
     return jsonify({"ok": True, **filament_catalog.parse_order(text)})
 
 
+def _settings_payload() -> dict:
+    """The Settings page's whole state: what each field is, what it holds, and
+    where that value came from.
+
+    A secret is never sent - only whether one is set. The page has no login, and
+    a password that is merely masked in the browser has still been handed to
+    anyone who can reach the page.
+    """
+    out = []
+    for spec in settings_schema.SCHEMA:
+        path = spec["path"]
+        item = {k: v for k, v in spec.items() if k != "help"}
+        item["help"] = spec.get("help")
+        # "overridden" now means someone set it, as against the default the
+        # code declares - there is no longer a file layer between the two
+        item["overridden"] = CONFIG.overridden(path)
+        item["default"] = None if spec["kind"] == "secret" else spec.get("default")
+        if spec["kind"] == "secret":
+            item["value"] = None
+            item["is_set"] = bool(CONFIG.get(path))
+        else:
+            # falling back to the schema's default, not to blank: a setting
+            # nobody has touched is still in force in the code, and a page that
+            # showed it empty would be saying the opposite of what the app does
+            item["value"] = CONFIG.get(path, spec.get("default"))
+        out.append(item)
+    return {"groups": settings_schema.GROUPS, "settings": out,
+            "connection": bootstrap.redacted()}
+
+
+@app.route("/api/diag")
+def api_diag():
+    """What the app has actually been doing, in counts.
+
+    Added because "the NAS is writing constantly" could not be answered from
+    the outside: the write paths are all conditional, and the conditions are
+    spread across a recording gate, a cloud poller and an MQTT callback.
+    """
+    up = max(1e-9, time.time() - _started_at)
+    counts = store.stats()
+    per_min = {k: round(v / up * 60, 1) for k, v in sorted(counts.items())}
+    writes = {k: v for k, v in counts.items()
+              if k.split()[0] in ("INSERT", "UPDATE", "DELETE", "REPLACE")}
+    return jsonify({
+        "uptime_sec": round(up, 1),
+        "recording_mode": _rec_mode,
+        "recording_active": _state.get("recording_active"),
+        "mqtt_frames": _frames["n"],
+        "mqtt_frames_per_min": round(_frames["n"] / up * 60, 1),
+        "statements": counts,
+        "statements_per_min": per_min,
+        "writes_total": sum(writes.values()),
+        "writes_per_min": round(sum(writes.values()) / up * 60, 1),
+        "sample_interval_sec": SAMPLE_INTERVAL(),
+        "backend": STORE_CFG.get("backend"),
+    })
+
+
+@app.route("/api/settings")
+def api_settings():
+    return jsonify(_settings_payload())
+
+
+@app.route("/api/settings", methods=["POST"])
+def api_settings_save():
+    """Write one or more settings. Everything is validated against the schema
+    before anything is stored, so a bad field cannot leave half a form applied."""
+    data = request.get_json(force=True, silent=True) or {}
+    changes = data.get("changes")
+    if not isinstance(changes, dict) or not changes:
+        return jsonify({"ok": False, "error": "nothing to change"}), 400
+
+    # validate the whole batch first
+    clean, clear = {}, []
+    for path, value in changes.items():
+        spec = settings_schema.BY_PATH.get(path)
+        if spec is None:
+            return jsonify({"ok": False, "error": f"{path} is not an editable setting"}), 400
+        # a secret left blank means "leave it alone", never "set it to empty" -
+        # the page cannot show the current one, so a blank box is not an edit
+        if spec["kind"] == "secret" and (value is None or value == ""):
+            continue
+        if value is None:
+            clear.append(path)          # explicit reset to the declared default
+            continue
+        try:
+            clean[path] = settings_schema.coerce(path, value)
+        except settings_schema.Invalid as e:
+            return jsonify({"ok": False, "error": str(e), "path": path}), 400
+    if not clean and not clear:
+        return jsonify({"ok": False, "error": "nothing to change"}), 400
+
+    try:
+        for path, value in clean.items():
+            CONFIG.set(path, value)
+        for path in clear:
+            CONFIG.clear(path)
+    except Exception as e:
+        print(f"[config] save failed: {e}")
+        return jsonify({"ok": False, "error": str(e)[:300]}), 500
+
+    # anything the pricing rules read is cached; a price change has to reach it
+    if any(p.startswith("filament.") or p.startswith("cost.") for p in list(clean) + clear):
+        _rebuild_order_prices()
+        _rebuild_filament_meta()
+    touched = sorted(set(list(clean) + clear))
+    restart = sorted(p for p in touched if not settings_schema.BY_PATH[p]["live"])
+    for p in touched:
+        shown = "(secret)" if p in settings_schema.SECRETS else CONFIG.get(p)
+        print(f"[config] {p} = {shown}")
+    return jsonify({"ok": True, "saved": touched, "restart_needed": restart})
+
+
 @app.route("/api/maintenance")
 def api_maintenance():
     return jsonify(_maintenance_block())
@@ -2357,7 +2575,7 @@ def api_print_control():
         if param not in _SPEED_PARAMS:
             return jsonify({"ok": False, "error": "speed must be 1-4"}), 400
         cmd = {"print": {"sequence_id": "0", "command": "print_speed", "param": param}}
-    elif action in ("fan", "temp") and not CTRL_GCODE:
+    elif action in ("fan", "temp") and not CTRL_GCODE():
         return jsonify({"ok": False, "error":
                         "gcode commands are off - the firmware rejects them "
                         "(HMS 0500_0500_0001_0007). Set controls.allow_gcode "
@@ -2406,13 +2624,15 @@ def api_print_control():
 #
 # Kept behind a switch rather than deleted, because it may behave differently in
 # LAN-only mode or on later firmware. Nothing raises the warning while it is off.
-AMS_ASSIGN = bool(FIL_CFG.get("allow_slot_assign", False))
+def AMS_ASSIGN():
+    return bool(FIL_CFG.get("allow_slot_assign", False))
 
 # Same verification gate, confirmed the hard way on an X2D: sending M140/M141
 # through `gcode_line` also raises HMS 0500_0500_0001_0007 and changes nothing.
 # The fan sliders use the same command, so they go with it. Off by default;
 # `controls.allow_gcode` re-enables the lot for testing on other firmware.
-CTRL_GCODE = bool((CFG.get("controls") or {}).get("allow_gcode", False))
+def CTRL_GCODE():
+    return bool((CFG.get("controls") or {}).get("allow_gcode", False))
 
 # Safe nozzle window per material, used when assigning a filament to a slot.
 # Only materials listed here can be assigned without explicit temperatures -
@@ -2437,7 +2657,7 @@ def api_ams_filament():
     Strict allowlist, like every other command: slot must exist, material must
     be known, colour must be six hex digits, temperatures are clamped.
     """
-    if not AMS_ASSIGN:
+    if not AMS_ASSIGN():
         return jsonify({"ok": False, "error":
                         "slot assignment is off - the firmware rejects this "
                         "command (HMS 0500_0500_0001_0007). Set "
@@ -2608,18 +2828,18 @@ def events():
 
 
 def _write_go2rtc_config() -> str:
-    """Generate go2rtc.yaml from the camera config. The RTSPS access code is
-    injected here from printer.config.json so it never has to live in a second
+    """Generate go2rtc.yaml from the camera settings. The RTSPS access code is
+    injected here from the stored settings so it never has to live in a second
     file. `#transport=udp` is required - the X2D's LIVE555 camera only feeds RTP
     over UDP, not TCP-interleaved (go2rtc's default)."""
     api_port = int(CAM_CFG.get("api_port", 1984))
     webrtc_port = int(CAM_CFG.get("webrtc_port", 8555))
     rtsp_port = int(CAM_CFG.get("rtsp_port", 322))
     src = CAM_CFG.get("src", "bambu")
-    url = (f"rtsps://bblp:{CFG['access_code']}@{CFG['ip']}:{rtsp_port}"
+    url = (f"rtsps://bblp:{CFG.get('access_code') or ''}@{CFG.get('ip') or ''}:{rtsp_port}"
            f"/streaming/live/1#transport=udp#backchannel=0")
     yaml = (
-        "# AUTO-GENERATED by app.py from printer.config.json - do not edit.\n"
+        "# AUTO-GENERATED by app.py from the stored settings - do not edit.\n"
         "api:\n"
         f'  listen: ":{api_port}"\n'
         "webrtc:\n"
@@ -2660,7 +2880,7 @@ def go2rtc_worker():
 
 
 def purge_worker():
-    keep = float(STORE_CFG.get("retention_days", 30))
+    keep = float(CFG.get("storage", {}).get("retention_days", 30))
     while True:
         try:
             n = store.purge(keep_days=keep)
@@ -2680,5 +2900,6 @@ if __name__ == "__main__":
         threading.Thread(target=cloud_worker, daemon=True).start()
     if CAM_CFG.get("enabled"):
         threading.Thread(target=go2rtc_worker, daemon=True).start()
-    print(f"[web] http://localhost:{PORT}  (printer {CFG['ip']}, model {CFG.get('model','?')}, storage={STORE_CFG.get('backend')})")
+    print(f"[web] http://localhost:{PORT}  (printer {CFG.get('ip') or 'not set'}, "
+          f"model {CFG.get('model','?')}, storage={STORE_CFG.get('backend')})")
     app.run(host="0.0.0.0", port=PORT, threaded=True)

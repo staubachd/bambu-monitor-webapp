@@ -15,7 +15,73 @@ Schema (one flat time-series table + a per-print summary table):
 """
 from __future__ import annotations
 
+import collections
+import threading
 import time
+
+
+def _tag(sql: str) -> str:
+    """'UPDATE prints', 'SELECT telemetry' - what a statement did, and to what.
+
+    Coarse on purpose: this exists so the app can answer "what are you doing to
+    the disk right now", which it previously had no way to say.
+    """
+    w = sql.split()
+    if not w:
+        return "?"
+    verb = w[0].upper()
+    tbl = "?"
+    if verb in ("INSERT", "REPLACE", "DELETE"):
+        for i, x in enumerate(w):
+            if x.upper() in ("INTO", "FROM") and i + 1 < len(w):
+                tbl = w[i + 1].split("(")[0]
+                break
+    elif verb == "UPDATE" and len(w) > 1:
+        tbl = w[1]
+    elif verb == "SELECT":
+        for i, x in enumerate(w):
+            if x.upper() == "FROM" and i + 1 < len(w):
+                tbl = w[i + 1]
+                break
+    return f"{verb} {tbl}"
+
+
+class _Counted:
+    """A cursor that tallies what it is asked to run.
+
+    One wrapper at the single place cursors are handed out, rather than a
+    counter in each of the forty methods that could drift out of date.
+    """
+
+    WRITES = ("INSERT", "UPDATE", "DELETE", "REPLACE")
+
+    def __init__(self, cur, store):
+        self._cur = cur
+        self._store = store
+
+    def execute(self, sql, *a, **kw):
+        tag = _tag(sql)
+        with self._store._counts_lock:
+            self._store.counts[tag] += 1
+        verb, _, tbl = tag.partition(" ")
+        if verb in self.WRITES and self._store.on_write:
+            self._store.on_write(tbl)
+        return self._cur.execute(sql, *a, **kw)
+
+    def executemany(self, sql, *a, **kw):
+        with self._store._counts_lock:
+            self._store.counts[_tag(sql) + " (many)"] += 1
+        return self._cur.executemany(sql, *a, **kw)
+
+    def __getattr__(self, name):          # fetchall, rowcount, close, ...
+        return getattr(self._cur, name)
+
+    def __enter__(self):
+        self._cur.__enter__()
+        return self
+
+    def __exit__(self, *a):
+        return self._cur.__exit__(*a)
 
 TELEMETRY_COLS = [
     "gcode_state", "percent", "layer", "total_layers",
@@ -46,6 +112,15 @@ LATE_COLUMNS = {
                   "price_per_kg": "FLOAT"},
     # notes shipped before they had categories
     "notes": {"category": "VARCHAR(60)"},
+}
+
+# Indexes added after the tables existed. CREATE TABLE IF NOT EXISTS does
+# nothing to an existing table, so an index declared inline reaches new installs
+# only - the same trap as LATE_COLUMNS, and worth the same list.
+#   prints.started_at: every listing orders by it, and _cost_block reads the
+#   table on a timer. Without this it is a full scan plus a filesort each time.
+LATE_INDEXES = {
+    "idx_prints_started": ("prints", "started_at"),
 }
 
 PRINT_COLS = ["job_id", "name", "started_at", "ended_at", "final_state",
@@ -121,13 +196,50 @@ def _row_from_state(s: dict) -> dict:
     }
 
 
+# Everything that is genuinely database-specific, in one place. Three different
+# questions used to hide behind `if self.backend == "sqlite"` - when to commit,
+# whether rows arrive as dicts, and which SQL to write - and only the third is
+# about the database. This table is the third.
+#
+# `server` marks the backends that speak the MySQL wire protocol and are talked
+# to over TCP with a connection per call; sqlite is the odd one out, reusing a
+# single connection and needing an explicit commit.
+DIALECTS = {
+    "sqlite": dict(
+        server=False, ph="?", auto="AUTOINCREMENT", blob="BLOB",
+        inline_index=False, columns="pragma", upsert="replace",
+    ),
+    "mariadb": dict(
+        server=True, ph="%s", auto="AUTO_INCREMENT", blob="LONGBLOB",
+        inline_index=True, columns="information_schema", upsert="replace",
+    ),
+    # MySQL is not a port: PyMySQL *is* the MySQL driver and MariaDB is the
+    # fork, so every answer below is the same one. It is listed separately
+    # rather than aliased so the wizard, the diagnostics and any future
+    # difference have a name to hang on.
+    "mysql": dict(
+        server=True, ph="%s", auto="AUTO_INCREMENT", blob="LONGBLOB",
+        inline_index=True, columns="information_schema", upsert="replace",
+    ),
+}
+
+
 class Storage:
     def __init__(self, cfg: dict):
         self.backend = cfg.get("backend", "sqlite")
-        if self.backend == "mariadb":
-            import pymysql  # lazy: only needed on the NAS
+        if self.backend not in DIALECTS:
+            raise ValueError(f"unknown storage backend {self.backend!r}; "
+                             f"expected one of {', '.join(sorted(DIALECTS))}")
+        self.dialect = DIALECTS[self.backend]
+        self.ph = self.dialect["ph"]
+        self._auto = self.dialect["auto"]
+        self._blob = self.dialect["blob"]
+        if self.dialect["server"]:
+            import pymysql  # lazy: only needed where a server is used
             from pymysql.constants import CLIENT
-            m = cfg["mariadb"]
+            # the connection block is keyed by the backend's own name; an
+            # install made before MySQL was offered only has "mariadb"
+            m = cfg.get(self.backend) or cfg.get("mariadb") or {}
             # FOUND_ROWS makes cursor.rowcount after an UPDATE count the rows
             # MATCHED, not the rows whose values actually differed. Every
             # `return n > 0` in this file means "the row existed", and without
@@ -140,9 +252,6 @@ class Storage:
                 autocommit=True, charset="utf8mb4",
                 client_flag=CLIENT.FOUND_ROWS,
             )
-            self.ph = "%s"
-            self._auto = "AUTO_INCREMENT"
-            self._blob = "LONGBLOB"
         else:
             import sqlite3
             path = cfg.get("sqlite_path", "telemetry.db")
@@ -150,21 +259,28 @@ class Storage:
             self._conn = sqlite3.connect(path, check_same_thread=False)
             self._conn.row_factory = sqlite3.Row
             self._connect = lambda: self._conn
-            self.ph = "?"
-            self._auto = "AUTOINCREMENT"
-            self._blob = "BLOB"
+        self.counts = collections.Counter()   # statement tag -> how many
+        self._counts_lock = threading.Lock()
+        # called with the table name after any write, so a caller can drop a
+        # cache without every write path having to remember to say so
+        self.on_write = None
         self._init_schema()
 
     # sqlite reuses one connection; mariadb opens per-call (thread-safe, cheap on LAN)
     def _cursor(self):
         conn = self._connect()
-        return conn, conn.cursor()
+        return conn, _Counted(conn.cursor(), self)
+
+    def stats(self) -> dict:
+        with self._counts_lock:
+            return dict(self.counts)
 
     def _init_schema(self):
         conn, cur = self._cursor()
         # MariaDB declares the ts index inline (works on all versions, incl. 10.3
         # where CREATE INDEX IF NOT EXISTS is unsupported); sqlite adds it after.
-        inline_idx = ",\n                INDEX idx_telemetry_ts (ts)" if self.backend != "sqlite" else ""
+        inline_idx = (",\n                INDEX idx_telemetry_ts (ts)"
+                      if self.dialect["inline_index"] else "")
         cur.execute(f"""
             CREATE TABLE IF NOT EXISTS telemetry (
                 id INTEGER PRIMARY KEY {self._auto},
@@ -239,12 +355,23 @@ class Storage:
                     print(f"[store] migrated: added {table}.{col}")
         if self.backend == "sqlite":
             cur.execute("CREATE INDEX IF NOT EXISTS idx_telemetry_ts ON telemetry(ts)")
+
+        # MySQL has no CREATE INDEX IF NOT EXISTS and MariaDB only gained it in
+        # 10.1, so ask and ignore the refusal rather than testing a version.
+        for name, (table, col) in LATE_INDEXES.items():
+            try:
+                cur.execute(f"CREATE INDEX {name} ON {table} ({col})")
+                print(f"[store] migrated: added index {name}")
+            except Exception:
+                pass          # already there, which is the common case
+
+        if self.backend == "sqlite":
             conn.commit()
         else:
             cur.close(); conn.close()
 
     def _existing_columns(self, cur, table: str) -> set:
-        if self.backend == "sqlite":
+        if self.dialect["columns"] == "pragma":
             cur.execute(f"PRAGMA table_info({table})")
             return {r[1] for r in cur.fetchall()}
         cur.execute(
@@ -688,6 +815,19 @@ class Storage:
         if self.backend != "sqlite":
             cur.close(); conn.close()
         return row[0] if row else default
+
+    def delete_setting(self, key: str) -> bool:
+        """Forget one setting. Used to reset a setting to the default declared
+        in settings_schema - which is not the same as storing a copy of that
+        default, because the default may change in a later version."""
+        conn, cur = self._cursor()
+        cur.execute(f"DELETE FROM settings WHERE skey={self.ph}", (key,))
+        n = cur.rowcount
+        if self.backend == "sqlite":
+            conn.commit()
+        else:
+            cur.close(); conn.close()
+        return n > 0
 
     def settings_with_prefix(self, prefix: str) -> dict:
         """All settings whose key starts with prefix, keyed without it."""

@@ -33,18 +33,15 @@ for a in sys.argv[1:]:
     if a.isdigit():
         limit = int(a)
 
-with open(os.path.join(HERE, "printer.config.json"), encoding="utf-8") as fh:
-    cfg = json.load(fh)
-cloud = cfg.get("cloud") or {}
+import config_store  # noqa: E402
+
+store, cfg = config_store.open_live()
+cloud = cfg.section("cloud")
 if not cloud.get("enabled"):
-    print("cloud.enabled is false in printer.config.json - Refresh can never do "
+    print("Bambu Cloud is off in Settings > Cloud - Refresh can never do "
           "anything. That alone explains a print staying 'running'.")
     sys.exit(1)
-
-scfg = cfg.get("storage", {"backend": "sqlite"})
-if scfg.get("backend", "sqlite") == "sqlite" and not os.path.isabs(scfg.get("sqlite_path", "telemetry.db")):
-    scfg = {**scfg, "sqlite_path": os.path.join(HERE, scfg.get("sqlite_path", "telemetry.db"))}
-store = Storage(scfg)
+# store already open
 local = {p["job_id"]: p for p in store.all_prints()}
 open_rows = {j: p for j, p in local.items() if not p.get("ended_at")}
 

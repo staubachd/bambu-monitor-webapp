@@ -18,9 +18,10 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root 
 sys.path.insert(0, HERE)
 from bambu_cloud import BambuCloud, CloudError  # noqa: E402
 
-CFG_PATH = os.path.join(HERE, "printer.config.json")
-cfg = json.load(open(CFG_PATH, encoding="utf-8"))
-cloud = cfg.setdefault("cloud", {})
+import config_store  # noqa: E402
+
+_store, cfg = config_store.open_live()
+cloud = cfg.section("cloud")
 serial = cfg.get("serial")
 
 email = input(f"Bambu account email [{cloud.get('email', '')}]: ").strip() or cloud.get("email", "")
@@ -97,8 +98,6 @@ else:
     print("(no tasks returned - if you only ever print in LAN mode, the cloud "
           "may have no history for this printer)")
 
-cloud.update(enabled=True, email=email, password=password,
-             token=c.token, poll_min=int(cloud.get("poll_min", 10)))
-with open(CFG_PATH, "w", encoding="utf-8") as fh:
-    json.dump(cfg, fh, indent=2, ensure_ascii=False)
-print("\n[ok] saved to printer.config.json (cloud enabled)")
+cfg.set_many({"cloud.enabled": True, "cloud.email": email, "cloud.password": password,
+              "cloud.token": c.token, "cloud.poll_min": int(cloud.get("poll_min", 10))})
+print("\n[ok] stored in the database, cloud enabled (Settings > Cloud)")
