@@ -117,6 +117,7 @@ def _seed() -> dict:
         db = {**db, b: {**bootstrap.server_block(db), "password": ""}}
 
     return dict(source=source, backends=list(bootstrap.BACKENDS),
+                config_path=bootstrap.PATH,
                 db=db or {"backend": "mariadb",
                           "mariadb": {"host": "127.0.0.1", "port": 3306,
                                       "user": "bambu", "password": "",
@@ -252,11 +253,21 @@ def _apply(payload: dict) -> tuple[dict, int]:
     # The fields are checked first because that costs nothing and touches
     # nothing. Opening the database creates the sqlite file, which would leave
     # a stray database behind every time someone mistypes a price.
+    ok, msg = bootstrap.writable()
+    if not ok:
+        return {"ok": False, "where": "file", "error": msg}, 400
+
     ok, msg = bootstrap.test(db)
     if not ok:
         return {"ok": False, "where": "db", "error": msg}, 400
 
-    bootstrap.save(db)
+    try:
+        bootstrap.save(db)
+    except OSError as e:
+        # writable() passed a moment ago, so this is a race or something odder -
+        # still not a reason to answer a form with a traceback
+        return {"ok": False, "where": "file",
+                "error": f"could not write {bootstrap.PATH}: {e}"}, 400
     store = Storage(bootstrap.load())
     cfg = config_store.ConfigStore()
     cfg.attach(store)
@@ -309,7 +320,11 @@ def serve(port: int) -> None:
     def tdb():
         d = request.get_json(force=True) or {}
         db = _fill_password(bootstrap.clean(d.get("db") or {}))
-        ok, msg = bootstrap.test(db)
+        # the folder has to take the file as much as the server has to answer,
+        # and step 1 is where both belong
+        ok, msg = bootstrap.writable()
+        if ok:
+            ok, msg = bootstrap.test(db)
         return jsonify(ok=ok, message=msg)
 
     @app.post("/setup/test-printer")

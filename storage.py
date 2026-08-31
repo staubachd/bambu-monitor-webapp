@@ -108,8 +108,12 @@ LATE_COLUMNS = {
     # so for third-party spools this can only come from the user.
     # a price typed in by hand, per filament identity - the config matrix
     # cannot know what a third-party spool cost
+    # "there were N grams left on <date>". Not an override of the computed
+    # figure but an anchor for it: prints and purchases after that moment still
+    # move it, so the correction does not go stale the next time anything prints.
     "filaments": {"vendor": "VARCHAR(64)", "alias_of": "VARCHAR(64)",
-                  "price_per_kg": "FLOAT"},
+                  "price_per_kg": "FLOAT",
+                  "left_anchor_g": "FLOAT", "left_anchor_at": "DOUBLE"},
     # notes shipped before they had categories
     "notes": {"category": "VARCHAR(60)"},
 }
@@ -153,7 +157,7 @@ PRINT_IMMUTABLE = {"job_id", "started_at", "label", "design_title",
 # every past print (see app._filament_stats).
 FILAMENT_COLS = ["fkey", "filament_id", "code", "vendor", "product", "color",
                  "color_name", "type", "is_bambu", "alias_of", "price_per_kg",
-                 "first_seen", "last_seen"]
+                 "left_anchor_g", "left_anchor_at", "first_seen", "last_seen"]
 
 # What was bought, as opposed to what was used. Kept as one row per order LINE
 # (not per spool) so an order of 3 spools stays one editable, deletable entry.
@@ -616,6 +620,25 @@ class Storage:
             cur.close(); conn.close()
         return n > 0
 
+    def set_filament_anchor(self, fkey: str, grams: float | None,
+                            at: float | None) -> bool:
+        """Pin how much is left, as of a moment in time.
+
+        Both columns move together: an anchor without its timestamp cannot be
+        aged forward, and a timestamp without an amount anchors nothing. Passing
+        None for both clears it and hands the figure back to bought-minus-used.
+        """
+        conn, cur = self._cursor()
+        cur.execute(f"UPDATE filaments SET left_anchor_g={self.ph}, "
+                    f"left_anchor_at={self.ph} WHERE fkey={self.ph}",
+                    (grams, at, fkey))
+        n = cur.rowcount
+        if self.backend == "sqlite":
+            conn.commit()
+        else:
+            cur.close(); conn.close()
+        return n > 0
+
     def set_filament_alias(self, fkey: str, target: str | None) -> bool:
         """Fold one identity into another, or (target None) stop folding it.
 
@@ -875,6 +898,74 @@ class Storage:
         if self.backend != "sqlite":
             cur.close(); conn.close()
         return {(r[0], r[1]) for r in rows}
+
+    # ---- whole-table access, for backup and restore ----------------------
+    # Deliberately generic and dumb: a backup has to carry what is THERE, not
+    # what today's code knows how to read. A column added next year lands in the
+    # export without anyone remembering to add it here.
+    def table_columns(self, table: str) -> list:
+        conn, cur = self._cursor()
+        try:
+            return sorted(self._existing_columns(cur, table))
+        finally:
+            if self.dialect["server"]:
+                cur.close(); conn.close()
+
+    def dump_table(self, table: str) -> list:
+        """Every row of one table, as dicts. Used by the backup."""
+        cols = self.table_columns(table)
+        if not cols:
+            return []
+        conn, cur = self._cursor()
+        cur.execute(f"SELECT {','.join(cols)} FROM {table}")
+        rows = cur.fetchall()
+        if self.dialect["server"]:
+            cur.close(); conn.close()
+        return [dict(zip(cols, r)) for r in rows]
+
+    def count_rows(self, table: str) -> int:
+        conn, cur = self._cursor()
+        try:
+            cur.execute(f"SELECT COUNT(*) FROM {table}")
+            return int(cur.fetchone()[0])
+        except Exception:
+            return 0
+        finally:
+            if self.dialect["server"]:
+                cur.close(); conn.close()
+
+    def insert_rows(self, table: str, rows: list) -> int:
+        """Insert rows as given. Only columns this database actually has are
+        written, so a backup from a newer version restores into an older one
+        without failing on a column it has never heard of."""
+        if not rows:
+            return 0
+        have = set(self.table_columns(table))
+        conn, cur = self._cursor()
+        n = 0
+        for row in rows:
+            cols = [c for c in row if c in have]
+            if not cols:
+                continue
+            ph = ",".join([self.ph] * len(cols))
+            cur.execute(f"INSERT INTO {table} ({','.join(cols)}) VALUES ({ph})",
+                        [row[c] for c in cols])
+            n += 1
+        if self.backend == "sqlite":
+            conn.commit()
+        else:
+            cur.close(); conn.close()
+        return n
+
+    def clear_table(self, table: str) -> int:
+        conn, cur = self._cursor()
+        cur.execute(f"DELETE FROM {table}")
+        n = cur.rowcount
+        if self.backend == "sqlite":
+            conn.commit()
+        else:
+            cur.close(); conn.close()
+        return n
 
     def purge(self, keep_days: float = 30.0) -> int:
         cutoff = time.time() - keep_days * 86400

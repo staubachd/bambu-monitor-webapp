@@ -112,3 +112,19 @@ watchdog restarts it with the new code (or run task #1 manually).
   familien-wiki — and since the settings live there too, that backup now covers
   the configuration as well. The only thing outside it is `instance/db.json`,
   which is five values you could retype in a minute.
+
+  For a second copy that does not depend on the database being readable, add
+  a daily task (Task Scheduler > Create > Scheduled Task > User-defined
+  script, as root):
+
+  ```sh
+  /volume1/apps/bambu-monitor/venv/bin/python3 \
+      /volume1/apps/bambu-monitor/tools/backup.py export \
+      --out /volume1/backup/bambu --keep 30
+  ```
+
+  That writes one JSON file per run - prints, filaments, purchases, notes and
+  settings - and keeps the newest 30. Put `--out` somewhere Hyper Backup
+  already covers. Restore with `tools/backup.py restore <file>`, which is a
+  dry run until you add `--apply`, or from **Settings > Sicherung** in the
+  browser.

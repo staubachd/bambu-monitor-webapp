@@ -23,6 +23,8 @@ import logging
 import os
 import queue
 import re
+import atexit
+import signal
 import subprocess
 import ssl
 import sys
@@ -34,8 +36,10 @@ from datetime import datetime, timedelta, timezone
 import paho.mqtt.client as mqtt
 from flask import Flask, Response, jsonify, request, send_file
 
+import backup
 import bootstrap
 import filament_catalog
+import power_providers
 import config_store
 import settings_schema
 from bambu_state import parse_report
@@ -734,72 +738,69 @@ def on_disconnect(client, userdata, *args):
         _state["connected"] = False
 
 
-def power_worker():
-    """Poll a TP-Link Tapo P110/P110M smart plug for live wattage.
+def POWER_PROVIDER():
+    return str(PWR_CFG.get("provider") or "tapo")
 
-    The printer itself reports no power data at all, so this comes from the plug
-    it is connected to. The tapo library is async, so we own a small event loop
-    in this thread. Failures are recorded and retried - never fatal.
+
+def power_worker():
+    """Keep `_power` fed from whichever meter is configured.
+
+    The provider owns its own loop - Tapo is polled and MQTT is pushed, and one
+    shape cannot serve both honestly. All this does is choose one, refuse to
+    start a half-configured one, and give it somewhere to report to.
     """
-    import asyncio
-    try:
-        from tapo import ApiClient
-    except ImportError:
-        print("[power] 'tapo' not installed; power monitoring disabled")
+    name = POWER_PROVIDER()
+    cls = power_providers.PROVIDERS.get(name)
+    if cls is None:
+        print(f"[power] no such meter {name!r}; expected one of "
+              f"{', '.join(sorted(power_providers.PROVIDERS))}")
+        _power.update(error=f"unknown meter {name}")
         return
 
-    # Enabled but not filled in is a state that exists now: the Settings page
-    # can switch the plug on before the credentials are typed. Say so once and
-    # stop, rather than raising in a background thread nobody is watching.
-    host, email, pw = (PWR_CFG.get("host"), PWR_CFG.get("email"),
-                       PWR_CFG.get("password"))
-    if not (host and email and pw):
-        missing = [n for n, v in (("Plug IP", host), ("Tapo account", email),
-                                  ("Tapo password", pw)) if not v]
-        print(f"[power] enabled, but {', '.join(missing)} not set - "
+    # The provider's own settings live under its name for anything but tapo,
+    # which was here first and keeps the flat keys its install already has.
+    cfg = PWR_CFG if name == "tapo" else CONFIG.section(f"power.{name}")
+
+    def report(**fields):
+        _power.update(**fields)
+        if "watts" in fields:
+            _accumulate_job_energy(fields["watts"])
+
+    provider = cls(
+        cfg=cfg, report=report, active=_mqtt_enabled.is_set,
+        state_io=(lambda: _load_power_state(name),
+                  lambda d: _save_power_state(name, d)),
+    )
+
+    # Enabled but not filled in is a reachable state: the Settings page can
+    # switch a meter on before its details are typed. Say what is missing and
+    # stop, rather than raising in a thread nobody is watching.
+    missing = provider.missing()
+    if missing:
+        print(f"[power] {name} is enabled, but {', '.join(missing)} not set - "
               f"fill it in under Settings > Power")
         _power.update(error="not configured")
         return
 
-    poll = float(PWR_CFG.get("poll_sec", 20))
-    model = PWR_CFG.get("model", "p110")
+    print(f"[power] meter: {name}")
+    provider.run()
 
-    async def loop():
-        client = ApiClient(email, pw)
-        dev = None
-        # Log only on state change, never on every poll: a flaky plug must not
-        # write a line every 20s, which would wake the NAS disks and defeat the
-        # HDD hibernation the whole app is built around.
-        last_err = None
-        started = False
-        while True:
-            if not _mqtt_enabled.is_set():   # 'off' means fully idle
-                await asyncio.sleep(5)
-                continue
-            try:
-                if dev is None:
-                    dev = await getattr(client, model)(host)
-                cp = await dev.get_current_power()
-                eu = await dev.get_energy_usage()
-                _power.update(watts=cp.current_power, today_wh=eu.today_energy,
-                              month_wh=eu.month_energy, ts=time.time(), error=None)
-                _accumulate_job_energy(cp.current_power)
-                if not started:
-                    print(f"[power] connected to {model} at {host}")
-                    started = True
-                elif last_err is not None:
-                    print(f"[power] {model} reachable again")
-                last_err = None
-            except Exception as e:
-                msg = str(e)[:140]
-                _power.update(error=msg)
-                dev = None  # force a fresh handshake next time
-                if msg != last_err:   # log the fault once, not on every retry
-                    print(f"[power] error: {e}")
-                    last_err = msg
-            await asyncio.sleep(poll)
 
-    asyncio.run(loop())
+# Where a provider keeps what it must remember across restarts - for MQTT, the
+# energy counter's value at the start of today and of this month. In the
+# settings table rather than a file, like everything else.
+def _load_power_state(name: str) -> dict:
+    try:
+        return json.loads(store.get_setting(f"power_state_{name}", "") or "{}")
+    except (TypeError, ValueError):
+        return {}
+
+
+def _save_power_state(name: str, data: dict) -> None:
+    try:
+        store.set_setting(f"power_state_{name}", json.dumps(data))
+    except Exception as e:
+        print(f"[power] could not save the energy baseline: {e}")
 
 
 FIL_CFG = CONFIG.section("filament")
@@ -1069,6 +1070,26 @@ def _match_purchase(p: dict, agg: dict, known: dict, fkey_by_code: dict,
     return None, None
 
 
+def _left_grams(a: dict, b: dict | None, meta: dict):
+    """How much of this filament is left.
+
+    Normally bought minus used, which is only as good as the two logs behind it:
+    a deleted print stops counting as used, and a spool bought before the
+    invoice importer existed never counted as bought. Either way the figure
+    drifts, and no amount of arithmetic can find the truth.
+
+    So it can be anchored: "there were N grams left, as of then". From that
+    moment the same arithmetic resumes - prints after it subtract, purchases
+    after it add - so a correction typed in once keeps working.
+    """
+    anchor = meta.get("left_anchor_g")
+    if anchor is not None:
+        return round(float(anchor)
+                     - a.get("grams_since", 0.0)
+                     + ((b or {}).get("grams_since", 0.0)), 1)
+    return round(b["grams"] - a["grams"], 1) if b else None
+
+
 def _filament_stats() -> dict:
     """Consumption per filament across the whole print history.
 
@@ -1098,6 +1119,13 @@ def _filament_stats() -> dict:
             k, hops = nxt, hops - 1
         return k
 
+    # "there were N grams left on <date>", per identity. Everything printed or
+    # bought after that moment still counts, so the correction ages forward
+    # instead of freezing the figure. Read on the canonical key, because an
+    # identity folded into another shares its stock.
+    anchored = {k: f.get("left_anchor_at") for k, f in known.items()
+                if f.get("left_anchor_g") is not None and f.get("left_anchor_at")}
+
     agg = {}
     for r in prints:
         started = r.get("started_at")
@@ -1113,6 +1141,10 @@ def _filament_stats() -> dict:
             a["grams"] += e["grams"]
             a["cost"] += e["cost"]
             a["prints"] += 1
+            # A print with no start time cannot be placed either side of the
+            # anchor. It is not counted against it rather than guessed at.
+            if started and started >= (anchored.get(fkey) or float("inf")):
+                a["grams_since"] = a.get("grams_since", 0.0) + e["grams"]
             # the detail's brand came from the RFID snapshot taken while that
             # print ran, so it still knows genuine-vs-third-party for filaments
             # the AMS has never shown us (used up before this page existed)
@@ -1166,13 +1198,18 @@ def _filament_stats() -> dict:
         p["_fkey"] = fkey       # resolved to a display name once `out` is built
         b = buys.setdefault(fkey, {"grams": 0.0, "cost": 0.0, "spools": 0,
                                    "orders": 0, "last": None})
-        b["grams"] += float(p.get("spools") or 1) * float(p.get("grams_each") or 1000)
+        grams = float(p.get("spools") or 1) * float(p.get("grams_each") or 1000)
+        b["grams"] += grams
         b["cost"] += float(p.get("total_price") or 0)
         b["spools"] += int(p.get("spools") or 1)
         b["orders"] += 1
         when = p.get("ordered_at") or p.get("created_at")
         if when:
             b["last"] = max(b["last"] or when, when)
+        # a spool bought after the anchor adds to what is left, the same way a
+        # print after it takes away
+        if when and when >= (anchored.get(fkey) or float("inf")):
+            b["grams_since"] = b.get("grams_since", 0.0) + grams
 
     # what is in the AMS right now -> remaining %, slot and the reorder link
     with _state_lock:
@@ -1210,7 +1247,10 @@ def _filament_stats() -> dict:
             "spools": b["spools"] if b else None,
             "orders": b["orders"] if b else None,
             "last_order": b["last"] if b else None,
-            "left_g": round(b["grams"] - a["grams"], 1) if b else None,
+            "left_g": _left_grams(a, b, meta),
+            # so the page can say the figure was pinned, and offer to unpin it
+            "left_anchor_g": meta.get("left_anchor_g"),
+            "left_anchor_at": meta.get("left_anchor_at"),
             "paid_per_kg": (round(b["cost"] / (b["grams"] / 1000.0), 2)
                             if b and b["grams"] else None),
             # the undiscounted price per kg this filament is costed at
@@ -2055,6 +2095,99 @@ def api_filament_price():
     return jsonify({"ok": True, "fkey": fkey, "price_per_kg": per_kg, "recosted": n})
 
 
+@app.route("/api/filaments/left", methods=["POST"])
+def api_filament_left():
+    """Pin how much of one filament is left, or unpin it.
+
+    "Left" is bought minus used, and both halves can be wrong: deleting a failed
+    print stops it counting as used, and a spool bought before the invoice
+    importer existed was never counted as bought. The AMS, meanwhile, weighs an
+    RFID spool and is simply right - so the useful thing is to copy that number
+    across rather than to reconcile two logs that cannot be reconciled.
+
+    Stored as an anchor, not an override: prints and purchases after this moment
+    still move the figure, so it does not have to be typed in again after the
+    next print.
+
+        {"fkey": "...", "grams": 480}    pin it to a number
+        {"fkey": "...", "from_ams": true} pin it to what the AMS reports now
+        {"fkey": "...", "grams": null}   unpin, back to bought minus used
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    fkey = (data.get("fkey") or "").strip()
+    if not fkey:
+        return jsonify({"ok": False, "error": "missing fkey"}), 400
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,24}\|([0-9A-Fa-f]{6}|\?)", fkey):
+        return jsonify({"ok": False, "error": "not a filament identity"}), 400
+
+    canon = _canon_fkey(fkey)
+    source = "typed"
+    if data.get("from_ams"):
+        grams = _ams_grams_left(canon)
+        source = "ams"
+        if grams is None:
+            return jsonify({"ok": False, "error": "the AMS is not reporting a "
+                            "remaining amount for this spool - it is not loaded, "
+                            "or it has no RFID tag"}), 400
+    else:
+        raw = data.get("grams")
+        if raw in (None, ""):
+            grams = None                      # unpin
+        else:
+            grams = _num_or_none(raw, float)
+            if grams is None or grams < 0:
+                return jsonify({"ok": False, "error": "not an amount in grams"}), 400
+            if grams > 100000:
+                return jsonify({"ok": False, "error": "that is not an amount in grams"}), 400
+            grams = round(grams, 1)
+
+    at = time.time() if grams is not None else None
+    try:
+        if not store.set_filament_anchor(canon, grams, at):
+            # a filament used up before the AMS ever saw it lives only in the
+            # print history and has no row to hang this on - create it, the same
+            # way naming or pricing one does
+            sku, _, hexc = canon.partition("|")
+            store.upsert_filament(
+                canon,
+                filament_id=sku if sku.upper().startswith("GF") else None,
+                type=None if sku.upper().startswith("GF") else sku,
+                color=filament_catalog.norm_color(hexc))
+            if not store.set_filament_anchor(canon, grams, at):
+                return jsonify({"ok": False, "error": "no such filament"}), 404
+    except Exception as e:
+        print(f"[filament] left-anchor update failed: {e}")
+        return jsonify({"ok": False, "error": str(e)[:300]}), 500
+
+    print(f"[filament] {canon} left -> "
+          f"{'(computed again)' if grams is None else f'{grams} g from the {source}'}")
+    return jsonify({"ok": True, "fkey": canon, "grams": grams, "at": at,
+                    "source": None if grams is None else source})
+
+
+def _ams_grams_left(fkey: str):
+    """What the AMS says is left on this spool right now, in grams.
+
+    None when the spool is not loaded, or has no tag: a third-party tray reports
+    -1 and an external spool 0, and neither means empty.
+    """
+    with _state_lock:
+        ams = json.loads(json.dumps(_state.get("ams") or {}))
+    groups = [u.get("trays") or [] for u in (ams.get("units") or [])]
+    groups.append(ams.get("external") or [])
+    for trays in groups:
+        for tr in trays:
+            if not tr.get("type"):
+                continue
+            if _canon_fkey(filament_catalog.key(tr.get("filament_id"), tr.get("color"),
+                                                tr.get("type"))) != fkey:
+                continue
+            pct, g = tr.get("remain_pct"), tr.get("grams_left")
+            if g is not None and pct is not None and pct >= 0:
+                return float(g)
+    return None
+
+
 @app.route("/api/filaments/delete", methods=["POST"])
 def api_filament_delete():
     """Forget a filament identity.
@@ -2246,6 +2379,73 @@ def _settings_payload() -> dict:
         out.append(item)
     return {"groups": settings_schema.GROUPS, "settings": out,
             "connection": bootstrap.redacted()}
+
+
+@app.route("/api/backup")
+def api_backup():
+    """Download everything worth keeping, as one JSON file.
+
+    ?secrets=1 includes the printer access code and account passwords, which is
+    off by default: a backup ends up in places a password should not.
+    ?images=0 leaves note pictures out, for a small file.
+    """
+    secrets = request.args.get("secrets") in ("1", "true", "yes")
+    images = request.args.get("images") not in ("0", "false", "no")
+    data = backup.export(store, include_secrets=secrets, include_images=images)
+    name = f"bambu-monitor-{datetime.now().strftime('%Y%m%d-%H%M')}.json"
+    body = json.dumps(data, indent=1, ensure_ascii=False, default=str)
+    print(f"[backup] exported {sum(data['counts'].values())} row(s)"
+          + (" INCLUDING credentials" if secrets else ""))
+    return Response(body, mimetype="application/json", headers={
+        "Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@app.route("/api/backup/restore", methods=["POST"])
+def api_backup_restore():
+    """Put a backup back.
+
+    Takes the file as multipart `file`, or the JSON body itself. `mode=merge`
+    (the default) only inserts what is missing; `mode=replace` empties each
+    table first and says how many rows that would delete. `dry=1` reports what
+    would happen and writes nothing - which is how the page shows a confirmation
+    that is actually true rather than a guess.
+    """
+    f = request.files.get("file")
+    if f is not None:
+        try:
+            data = json.loads(f.read().decode("utf-8", "replace"))
+        except ValueError as e:
+            return jsonify({"ok": False, "error": f"that file is not JSON: {e}"}), 400
+        mode = request.form.get("mode", "merge")
+        dry = request.form.get("dry") in ("1", "true", "yes")
+    else:
+        body = request.get_json(force=True, silent=True) or {}
+        data = body.get("backup")
+        mode = body.get("mode", "merge")
+        dry = bool(body.get("dry"))
+        if data is None:
+            return jsonify({"ok": False, "error": "no backup in the request"}), 400
+
+    why = backup.check(data)
+    if why:
+        return jsonify({"ok": False, "error": why}), 400
+    try:
+        report = backup.restore(store, data, mode=mode, dry_run=dry)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        print(f"[backup] restore failed: {e}")
+        return jsonify({"ok": False, "error": str(e)[:300]}), 500
+
+    if not dry:
+        # everything downstream reads these at import: a restore has just
+        # changed what they are
+        CONFIG.reload()
+        _rebuild_filament_meta()
+        _cost_dirty()
+        print(f"[backup] restored: {report['inserted']} inserted, "
+              f"{report['skipped']} already there, {report['deleted']} replaced")
+    return jsonify({"ok": True, "summary": backup.summarise(data), **report})
 
 
 @app.route("/api/diag")
@@ -2855,6 +3055,77 @@ def _write_go2rtc_config() -> str:
     return path
 
 
+# go2rtc is a separate process, not a thread. Killing app.py does not kill it:
+# it is orphaned and keeps holding its ports, so the NEXT start finds :1984 and
+# :8554 already taken and the relay never comes up - with nothing in the log but
+# "address already in use" every five seconds, forever.
+#
+# Two halves are needed. A pidfile, so a start can clear up after a previous run
+# that was killed or crashed; and a signal handler, so a clean stop does not
+# leave one behind in the first place.
+GO2RTC_PID = os.path.join(HERE, "go2rtc.pid")
+_go2rtc_proc = None
+
+
+def _reap_previous_go2rtc() -> bool:
+    """Stop a go2rtc left behind by an earlier run. True if one was there."""
+    try:
+        with open(GO2RTC_PID, encoding="utf-8") as fh:
+            pid = int((fh.read() or "0").strip())
+    except (OSError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)                      # still alive?
+    except OSError:
+        os.path.exists(GO2RTC_PID) and os.unlink(GO2RTC_PID)
+        return False
+    print(f"[cam] a go2rtc from an earlier run is still holding its ports "
+          f"(pid {pid}); stopping it")
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError as e:
+        print(f"[cam] could not stop pid {pid}: {e}")
+        return False
+    for _ in range(20):                      # up to 10s for it to let go
+        time.sleep(0.5)
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            break
+    else:
+        # SIGKILL on the NAS; Windows has no such signal, and os.kill there
+        # terminates whatever it is given, so SIGTERM is the same thing twice
+        try:
+            os.kill(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+            print(f"[cam] pid {pid} ignored SIGTERM; killed")
+        except OSError:
+            pass
+    os.path.exists(GO2RTC_PID) and os.unlink(GO2RTC_PID)
+    return True
+
+
+def _stop_go2rtc(*_a):
+    """Take the relay down with us. Registered for a clean exit and for the
+    SIGTERM that start.sh and `pkill` send."""
+    proc = _go2rtc_proc
+    if proc is not None and proc.poll() is None:
+        try:
+            proc.terminate()
+            proc.wait(timeout=5)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+    try:
+        if os.path.exists(GO2RTC_PID):
+            os.unlink(GO2RTC_PID)
+    except OSError:
+        pass
+
+
 def go2rtc_worker():
     """Launch and supervise the go2rtc relay - a single static binary, no Docker.
     Converts the printer's RTSPS/H.264 into browser-playable WebRTC/MSE. Restarts
@@ -2868,15 +3139,34 @@ def go2rtc_worker():
     except OSError:
         pass
     cfgpath = _write_go2rtc_config()
+    _reap_previous_go2rtc()
+    global _go2rtc_proc
+    # A relay that dies immediately, over and over, is a misconfiguration rather
+    # than a blip - back off instead of writing the same line to app.log twelve
+    # times a minute for ever.
+    wait, quick = 5, 0
     while True:
         try:
             print("[cam] starting go2rtc relay")
-            proc = subprocess.Popen([binpath, "-config", cfgpath], cwd=HERE)
-            proc.wait()
-            print(f"[cam] go2rtc exited ({proc.returncode}); restarting in 5s")
+            started = time.time()
+            _go2rtc_proc = subprocess.Popen([binpath, "-config", cfgpath], cwd=HERE)
+            with open(GO2RTC_PID, "w", encoding="utf-8") as fh:
+                fh.write(str(_go2rtc_proc.pid))
+            _go2rtc_proc.wait()
+            ran = time.time() - started
+            quick = quick + 1 if ran < 10 else 0
+            print(f"[cam] go2rtc exited ({_go2rtc_proc.returncode}) after "
+                  f"{ran:.0f}s; restarting in {wait}s")
+            if quick == 3:
+                print("[cam] it keeps exiting at once. The usual cause is another "
+                      "copy still holding the ports - check with "
+                      "`ps | grep go2rtc` and `netstat -tlnp | grep 1984`.")
         except Exception as e:
-            print(f"[cam] go2rtc error: {e}; retrying in 5s")
-        time.sleep(5)
+            print(f"[cam] go2rtc error: {e}; retrying in {wait}s")
+            quick += 1
+        _go2rtc_proc = None
+        time.sleep(wait)
+        wait = min(wait * 2, 120) if quick else 5
 
 
 def purge_worker():
@@ -2892,6 +3182,14 @@ def purge_worker():
 
 
 if __name__ == "__main__":
+    # so a stop takes the relay with it rather than orphaning it
+    atexit.register(_stop_go2rtc)
+    for _sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            signal.signal(_sig, lambda *_a: (_stop_go2rtc(), sys.exit(0)))
+        except (ValueError, OSError):
+            pass          # not the main thread, or a platform without it
+
     threading.Thread(target=mqtt_worker, daemon=True).start()
     threading.Thread(target=purge_worker, daemon=True).start()
     if PWR_CFG.get("enabled"):

@@ -70,6 +70,33 @@ def resolve(cfg: dict) -> dict:
     return cfg
 
 
+def writable() -> tuple[bool, str]:
+    """Can the connection file actually be written where it has to go?
+
+    Asked before the wizard's last page rather than discovered by it. The app
+    folder can be owned by another user, mounted read-only, or on a share with
+    no write permission, and learning that only at Finish - as a traceback in a
+    task-scheduler log, after five pages of typing - is a miserable way to find
+    out. On success the second value is the directory, so a caller can show it.
+    """
+    try:
+        os.makedirs(DIR, exist_ok=True)
+    except OSError as e:
+        return False, (f"cannot create {DIR}: {e.strerror or e}. The app stores the "
+                       f"database connection there, so it must be able to write "
+                       f"into its own folder.")
+    probe = os.path.join(DIR, ".write-probe")
+    try:
+        with open(probe, "w", encoding="utf-8") as fh:
+            fh.write("ok")
+        os.unlink(probe)
+    except OSError as e:
+        return False, (f"{DIR} is not writable: {e.strerror or e}. Check who owns "
+                       f"the app folder - on a Synology the app usually runs as root, "
+                       f"and a folder copied over SMB may not be.")
+    return True, DIR
+
+
 def save(cfg: dict) -> None:
     """Write it atomically, and keep it to owner-only.
 

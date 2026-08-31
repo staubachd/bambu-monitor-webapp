@@ -24,3 +24,5 @@ __pycache__/
 venv/
 app*.log
 app*.err
+# JSON backups written by tools/backup.py - your data, not the code
+backups/

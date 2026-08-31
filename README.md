@@ -32,6 +32,7 @@ runnable on Windows/macOS/Linux for development.
 - [Live view (camera)](#live-view-camera)
 - [HTTP API](#http-api)
 - [Storage & database schema](#storage--database-schema)
+  - [Backup and restore](#backup-and-restore)
   - [Keeping an idle app quiet](#keeping-an-idle-app-quiet)
   - [Adding another backend](#adding-another-backend)
 - [How the tricky bits work](#how-the-tricky-bits-work)
@@ -520,11 +521,51 @@ Design constraints that shaped these choices:
   `M106` and bed/chamber temperatures `M140` / `M141`)
 - No browser web UI exists on the printer, and telemetry works even in Cloud mode.
 
-### 2. Tapo smart plug (power)
-- A **Tapo P110/P110M** on the printer's outlet, queried on the LAN via the `tapo`
-  library using the Tapo account email/password.
-- Gives instantaneous watts plus today/month cumulative energy, which is turned
-  into € using `cost.price_per_kwh`.
+### 2. A smart plug (power)
+The printer reports no power at all, so it comes from whatever it is plugged
+into — and which plug that is isn't something this app gets to choose. The
+source is a **provider**, picked in Settings → Strom:
+
+| provider | what it is | how it's read |
+|--|--|--|
+| `tapo` | TP-Link **P110 / P110M / P115** | polled on the LAN via the `tapo` library, with the Tapo account login |
+| `mqtt` | **Zigbee2MQTT** (so IKEA **INSPELNING** and other Zigbee plugs), **Shelly**, **Tasmota**, **Home Assistant** | subscribes to the plug's topic on a broker |
+
+A provider only has to report **watts**. Per-print energy is integrated from
+wattage over wall-clock time (`_accumulate_job_energy`), so `today_wh` /
+`month_wh` are display only and a meter that reports just the draw is a
+first-class citizen.
+
+**Why MQTT and not "the plug's IP".** An IKEA INSPELNING is Zigbee, not WiFi: it
+has no address, and nothing can connect to it directly. It reaches the network
+through whatever it is paired to — a DIRIGERA hub, or a Zigbee stick running
+Zigbee2MQTT — so the reading is *pushed* to a broker rather than polled from a
+plug. That difference is why a provider owns its own loop instead of implementing
+a shared `poll()`.
+
+Two things the MQTT provider has to get right, neither of which Tapo has to:
+- **Silence is a failure.** Connecting to a broker proves nothing; a wrong topic
+  never errors, it just never arrives. So an unheard topic is reported as an
+  error (`connected, but nothing has arrived on … yet`) rather than displayed as
+  zero consumption, and a message that arrives without the expected field says
+  which fields it *does* have.
+- **Energy is a counter, not a window.** Tapo reports "today" and "this month";
+  a Zigbee plug reports one number that only goes up. Today and this month are
+  differences from a baseline captured at the last rollover. The baselines are
+  persisted (so a restart doesn't zero the day) but written **only when one
+  moves** — twice a day at most, because a plug publishing every few seconds
+  behind a database write is exactly the constant writing that stops the NAS
+  disks from sleeping. A counter that goes backwards means the plug was reset,
+  and rebases rather than reporting a negative day.
+
+Finding the topic and field names is the fiddly part, so:
+
+```bash
+python tools/sniff_power_mqtt.py 192.168.1.10          # listens, prints what it hears
+```
+
+It marks the fields that look like a power reading and prints the three values
+to paste into Settings.
 
 ### 3. Bambu Cloud (enrichment, optional)
 - `bambu_cloud.py` logs into the Bambu account and reads
@@ -544,6 +585,7 @@ Design constraints that shaped these choices:
 | `bambu_state.py`              | Pure parser: turns a raw Bambu MQTT report into a clean, stable state dict. No I/O. |
 | `storage.py`                  | Storage abstraction with two backends (sqlite / mariadb), schema, migrations, per-print upserts/deletes, filament identities. |
 | `bambu_cloud.py`              | Bambu Cloud client (login, task list) for finished-print enrichment.    |
+| `power_providers.py`          | Where the wattage comes from: one small interface, a Tapo poller and an MQTT subscriber. Adding a meter is a class plus a row in `PROVIDERS`. |
 | `filament_catalog.py`         | Colour-code → colour-name table, regional Bambu store search links, and the best-effort order-confirmation parser. Has a self-test (`python filament_catalog.py`). |
 | `dashboard.html`             | The entire frontend (HTML + CSS + JS + i18n) in one file.               |
 | `bootstrap.py`                | The database connection — the only thing that cannot live in the database. Reads/writes `instance/db.json`, and tests a connection before anything is written to it. |
@@ -554,16 +596,20 @@ Design constraints that shaped these choices:
 | `requirements.txt`            | Python dependencies.                                                    |
 | `go2rtc/`                     | The go2rtc relay binary for the camera Live view (downloaded per-arch; not committed). |
 | **`tools/`**                  | Dev & one-time setup helpers — not part of the running app.             |
+| `tools/backup.py`             | Export the database to JSON and restore it. `export --out DIR --keep N` for a scheduled backup; `restore` is a dry run until `--apply`. |
 | `tools/why_disk_busy.py`      | Read-only: samples `/api/diag` twice and reports what the app is writing, and how often. For "why are the NAS disks never idle". |
 | `tools/import_config.py`      | Headless version of the wizard: moves an old `printer.config.json` into the database. |
 | `tools/setup_cloud.py`        | Interactive Bambu Cloud login → stores an auth token in the database.  |
-| `tools/setup_power.py`        | Verifies Tapo plug connectivity and credentials.                        |
+| `tools/setup_power.py`        | Verifies **Tapo** plug connectivity and credentials, then stores them.  |
+| `tools/sniff_power_mqtt.py`   | Read-only: listens to an MQTT broker and prints the topics and fields it hears, marking the ones that look like a power meter. For filling in Settings → Power when the meter is `mqtt`. |
 | `tools/test_mqtt_local.py`    | Standalone check that local MQTT works against the printer.             |
 | `tools/capture_sample.py`     | Captures a real report to `samples/sample_report.json` for offline parser testing. |
 | `tools/explore_ftps.py`       | Explores the printer's FTPS file store (models/thumbnails).            |
 | `tools/dump_cloud_tasks.py`   | Read-only: cloud tasks next to the stored prints. Diagnoses why an orphaned print didn't close. |
 | `tools/dump_filaments.py`     | Read-only: every filament identity, where it came from, and which look like the same spool split in two. |
 | `samples/`                    | Captured payloads used by `bambu_state.py`'s self-test (not committed).  |
+| **`tests/`**                  | The test suite: 42 files plus the two module self-tests. Run it with `tests/runall.ps1`, which copies the app into a scratch folder and runs every `t_*.py` / `t_*.js` against a throwaway copy of the database, reporting pass/fail per file - silence is not a pass. Not needed on the NAS. |
+
 | **`deploy/`**                 |                                                                         |
 | `deploy/start.sh`             | Idempotent POSIX launcher (pidfile + `kill -0`), supports a `restart` arg. |
 | `deploy/DEPLOY.md`            | Step-by-step NAS deployment notes.                                      |
@@ -598,6 +644,25 @@ It is written atomically and chmod 600 — it holds a database password. A
 relative `sqlite_path` resolves against the app folder, so the directory the
 service happens to start in cannot decide which database is opened. Not
 committed.
+
+**The location is derived, never assumed.** `instance/db.json` sits beside the
+app, wherever the app was installed — `bootstrap.HERE` comes from the module's
+own `__file__`, so it is `/volume1/apps/bambu-monitor/instance/db.json` on one
+NAS and something else entirely on the next, with nothing to configure and
+nothing to edit. Moving the app folder moves the file with it. A test asserts
+this: no path is hardcoded, and changing the working directory does not move it.
+The wizard shows the full path on its first page, and Settings → Database shows
+it afterwards.
+
+The one place a path *is* fixed is `APP_DIR` at the top of
+[`deploy/start.sh`](deploy/start.sh), which is the launcher rather than the app —
+if you install somewhere other than `/volume1/apps/bambu-monitor`, that line is
+the only thing to change.
+
+Before the wizard writes anything it checks the folder will actually take the
+file — an app directory owned by another user, or copied read-only over SMB,
+otherwise fails at Finish with a traceback in the task-scheduler log after five
+pages of typing. It now fails on page one, saying which folder and why.
 
 ### First run
 
@@ -807,6 +872,9 @@ printer (and re-enable LAN Mode Live View, which a reboot can revert).
 | `GET /api/filaments`       | Per-filament consumption (grams, cost, prints, share, last used) joined with the stored identities, the purchase log and what is loaded in the AMS right now. |
 | `POST /api/filaments/merge` | Fold one identity into another `{ "from": …, "into": … }`; a blank `into` unmerges. Refuses self-merges and alias loops. |
 | `POST /api/filaments/identity` | Name a filament `{ "fkey": …, "vendor": …, "product": …, "color_name": … }`. Creates the identity row if only the print history knew it; empty values clear a field. |
+| `GET /api/backup`          | Download everything worth keeping as one JSON file. `?secrets=1` includes credentials (off by default), `?images=0` leaves note pictures out. |
+| `POST /api/backup/restore` | Restore one, as multipart `file` or a JSON body. `mode=merge` (default) inserts only what is missing; `mode=replace` empties each table first. `dry=1` reports what would happen and writes nothing. |
+| `POST /api/filaments/left` | Pin how much is left `{ "fkey": …, "grams": 480 }`, take it from the printer `{ "fkey": …, "from_ams": true }`, or unpin with `"grams": null`. Stored as an anchor with a timestamp, so prints and purchases after it still count. |
 | `POST /api/purchases`      | Log one or more order lines `{ "lines": [ … ] }` (or a single line object). |
 | `POST /api/purchases/parse`| Read an order: an uploaded invoice PDF (`multipart`, field `file`) or pasted text (`{ "text": … }`). **Stores nothing** — returns suggested lines for the user to confirm. |
 | `POST /api/purchases/delete` | Remove one order line `{ "id": … }`.                            |
@@ -874,6 +942,49 @@ evolve without manual `ALTER`s.
 
 `purge_worker` trims `telemetry` beyond `retention_days`.
 
+### Backup and restore
+
+The print history is the part nothing else has a copy of: the printer does not
+keep it, the cloud keeps a rolling window, and every cost figure on the page is
+derived from it. Filament identities are next - the names, colours and prices
+somebody typed by hand.
+
+**Settings → Sicherung** downloads one JSON file, and restores one. Or, for a
+backup that happens whether or not anyone remembers it:
+
+```bash
+python tools/backup.py export --out /volume1/backup/bambu --keep 30
+python tools/backup.py show    <file>      # what is in it
+python tools/backup.py restore <file>      # says what it WOULD do
+python tools/backup.py restore <file> --apply
+```
+
+Point `--out` at a folder Hyper Backup already covers and the history becomes
+part of the off-site backup. Written to a temporary name and moved into place,
+so an interrupted run never leaves a half-file that looks complete.
+
+Three decisions worth knowing, because each can bite:
+
+- **Telemetry is not in it.** A temperature sample every 20 seconds is the bulk
+  of the database and the only table nothing is computed from — 3 000 rows for
+  five prints. Including it would turn a 200 KB backup into a 100 MB one and
+  make it too slow to take often. The file says so, in itself.
+- **Credentials are left out by default.** The settings table holds the printer
+  access code and the Bambu and Tapo passwords. A backup is a file that gets
+  emailed, synced and copied to sticks; those four values are trivially
+  retypeable and the rest of the file is not. `?secrets=1` / `--secrets`
+  includes them and stamps a warning inside the file.
+- **Restore never destroys by default.** `merge` inserts what is missing and
+  leaves everything it finds alone, so restoring onto a database that has been
+  used since cannot lose the newer work. `replace` empties each table first —
+  and both the page and the tool run a **dry pass first** and report exactly how
+  many rows would be deleted, because the preview has to be the truth. A test
+  asserts the dry run's numbers match what the real one then does.
+
+A backup from a newer version restores into an older one: only columns the
+database actually has are written, so a column added later is dropped rather
+than failing the restore on its first row.
+
 ### Keeping an idle app quiet
 
 The NAS's disks can only hibernate if nothing is writing to them, so **an idle
@@ -917,21 +1028,21 @@ one test, and only the third has anything to do with SQL:
 | **dialect** — the only genuinely database-specific SQL | **5** | yes, and that is the whole list |
 
 The five live in one table, `DIALECTS` at
-[storage.py:207](storage.py#L207) — one row per backend, and adding a backend is
+[storage.py:211](storage.py#L211) — one row per backend, and adding a backend is
 filling one in:
 
 | key | sqlite | MariaDB / MySQL | used at |
 |--|--|--|--|
-| `auto` | `AUTOINCREMENT` | `AUTO_INCREMENT` | [storage.py:235](storage.py#L235) |
-| `blob` | `BLOB` | `LONGBLOB` | [storage.py:236](storage.py#L236) |
-| `inline_index` | separate `CREATE INDEX` after | inline in `CREATE TABLE` | [storage.py:283](storage.py#L283) |
-| `columns` | `PRAGMA table_info` | `information_schema.COLUMNS` | [storage.py:374](storage.py#L374) |
-| `upsert` | `REPLACE INTO` | `REPLACE INTO` | [storage.py:844](storage.py#L844), [storage.py:855](storage.py#L855) |
+| `auto` | `AUTOINCREMENT` | `AUTO_INCREMENT` | [storage.py:239](storage.py#L239) |
+| `blob` | `BLOB` | `LONGBLOB` | [storage.py:240](storage.py#L240) |
+| `inline_index` | separate `CREATE INDEX` after | inline in `CREATE TABLE` | [storage.py:287](storage.py#L287) |
+| `columns` | `PRAGMA table_info` | `information_schema.COLUMNS` | [storage.py:378](storage.py#L378) |
+| `upsert` | `REPLACE INTO` | `REPLACE INTO` | [storage.py:867](storage.py#L867), [storage.py:878](storage.py#L878) |
 
 A sixth key, `server`, is not about SQL: it says whether the backend is reached
 over TCP with a connection per call (and so needs no explicit commit), which is
 the lifecycle question, and it is what the connect branch at
-[storage.py:237](storage.py#L237) tests.
+[storage.py:241](storage.py#L241) tests.
 
 Two things make this smaller than it looks. There is **no
 `ON DUPLICATE KEY UPDATE` anywhere** — the `prints` and `filaments` upserts are
@@ -958,7 +1069,7 @@ So, concretely:
   differs), `BYTEA`, a separate `CREATE INDEX`, `INSERT … ON CONFLICT DO UPDATE`
   for those two statements, and a slightly different information_schema query.
   `rowcount` is a bonus: Postgres counts matched rows natively, so the
-  `CLIENT.FOUND_ROWS` workaround at [storage.py:253](storage.py#L253) is not
+  `CLIENT.FOUND_ROWS` workaround at [storage.py:247](storage.py#L247) is not
   needed. The work that is **not** visible in a grep is type strictness —
   sqlite and MySQL accept `None` or `""` into a `FLOAT`, Postgres does not — and
   finding those needs the test suite run against a live server, not reasoning
@@ -981,6 +1092,24 @@ backend ever arrives that is neither.
 ## How the tricky bits work
 
 A few behaviours are non-obvious because the printer's raw data is messy:
+
+- **"Left" can be corrected, and the correction ages.** The Left column is
+  bought minus used, and both halves come from logs that can be incomplete: a
+  deleted print stops counting as used, and a spool bought before the invoice
+  importer existed never counted as bought. Either way the figure drifts, and no
+  arithmetic can recover the truth — but the AMS weighs an RFID spool and simply
+  knows, which is what the Status column shows.
+
+  So the cell is clickable: type a number, or press **aus dem AMS** to take what
+  the printer reports for that spool right now. What is stored is not the number
+  but an **anchor** — "N grams left, as of then" — and prints and purchases after
+  that moment keep moving it. A plain override would be wrong again after the
+  next print; an anchor stays right. A pinned figure is shown in bold, with the
+  date in its tooltip, and emptying the box hands it back to the arithmetic.
+
+  The AMS button appears only for a spool that reports a real remaining amount.
+  A third-party tray sends `-1` and an external spool `0`, and neither means
+  empty, so neither is offered.
 
 - **Packed temperatures.** Once a target is set, the X2D packs current + target into
   one integer as `(target << 16) | current`. `bambu_state._temp_pair()` detects the

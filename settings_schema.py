@@ -80,16 +80,62 @@ SCHEMA = [
          kind="int", group="Recording", live=True, min=0, max=1440),
 
     # ---- power -------------------------------------------------------------
-    dict(path="power.enabled", default=False, label="Smart plug enabled", kind="bool", group="Power",
-         live=False),
-    dict(path="power.host", label="Plug IP", kind="text", group="Power", live=False),
+    # The plug someone owns is not something this app gets to choose, so the
+    # source is a provider (see power_providers.py) and everything below the
+    # switch belongs to one of them. `show_if` keeps the other one's fields off
+    # the page rather than presenting eleven boxes of which five apply.
+    dict(path="power.enabled", default=False, label="Power monitoring enabled", kind="bool",
+         group="Power", live=False),
+    dict(path="power.provider", default="tapo", label="Meter", kind="select", group="Power",
+         live=False, options=["tapo", "mqtt"],
+         option_labels={"tapo": "Tapo (TP-Link P110/P115)",
+                        "mqtt": "MQTT (Zigbee2MQTT, Shelly, Tasmota)"},
+         help="tapo = TP-Link P110/P115 over WiFi. mqtt = anything publishing to a broker: "
+              "Zigbee2MQTT (IKEA INSPELNING and other Zigbee plugs), Shelly, Tasmota, "
+              "Home Assistant."),
+
+    dict(path="power.host", label="Plug IP", kind="text", group="Power", live=False,
+         show_if=("power.provider", "tapo")),
     dict(path="power.model", default="p110", label="Plug model", kind="select", group="Power",
-         live=False, options=["p110", "p110m", "p115"]),
-    dict(path="power.email", label="Tapo account", kind="text", group="Power", live=False),
+         live=False, options=["p110", "p110m", "p115"],
+         show_if=("power.provider", "tapo")),
+    dict(path="power.email", label="Tapo account", kind="text", group="Power", live=False,
+         show_if=("power.provider", "tapo")),
     dict(path="power.password", label="Tapo password", kind="secret", group="Power",
-         live=False),
+         live=False, show_if=("power.provider", "tapo")),
     dict(path="power.poll_sec", default=20, label="Poll every (s)", kind="int", group="Power",
-         live=True, min=5, max=3600),
+         live=True, min=5, max=3600, show_if=("power.provider", "tapo")),
+
+    # MQTT: a Zigbee plug has no address of its own, so the reading is read from
+    # whatever bridge it is paired to rather than from the plug.
+    dict(path="power.mqtt.host", label="Broker address", kind="text", group="Power",
+         live=False, show_if=("power.provider", "mqtt"),
+         help="Where Zigbee2MQTT / Home Assistant publishes. Often the same machine as this app."),
+    dict(path="power.mqtt.port", default=1883, label="Broker port", kind="int", group="Power",
+         live=False, min=1, max=65535, show_if=("power.provider", "mqtt")),
+    # empty is a real answer here, not an unanswered question - most home
+    # brokers allow anonymous - so it has a default and the page says "default"
+    dict(path="power.mqtt.user", default="", label="Broker user", kind="text",
+         group="Power", live=False,
+         show_if=("power.provider", "mqtt"), help="Leave empty if the broker allows anonymous."),
+    dict(path="power.mqtt.password", label="Broker password", kind="secret", group="Power",
+         live=False, show_if=("power.provider", "mqtt")),
+    dict(path="power.mqtt.topic", label="Topic", kind="text", group="Power", live=False,
+         show_if=("power.provider", "mqtt"),
+         help="The plug's own topic, e.g. zigbee2mqtt/printer. "
+              "tools/sniff_power_mqtt.py lists what a broker is publishing."),
+    dict(path="power.mqtt.watts_field", default="power", label="Field: watts", kind="text",
+         group="Power", live=False, show_if=("power.provider", "mqtt"),
+         help="Key in the message holding the current draw. 'power' for Zigbee2MQTT; "
+              "nested keys are written with dots."),
+    dict(path="power.mqtt.energy_field", default="energy", label="Field: energy total",
+         kind="text", group="Power", live=False, show_if=("power.provider", "mqtt"),
+         help="A counter that only goes up. Today and this month are worked out from it."),
+    dict(path="power.mqtt.energy_unit", default="kWh", label="Energy unit", kind="select",
+         group="Power", live=False, options=["kWh", "Wh"],
+         show_if=("power.provider", "mqtt")),
+    dict(path="power.mqtt.tls", default=False, label="Broker uses TLS", kind="bool",
+         group="Power", live=False, show_if=("power.provider", "mqtt")),
 
     # ---- cloud -------------------------------------------------------------
     dict(path="cloud.enabled", default=False, label="Bambu Cloud enabled", kind="bool", group="Cloud",

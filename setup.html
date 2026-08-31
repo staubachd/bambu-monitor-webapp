@@ -152,6 +152,9 @@ const DE = {
   "Back":"Zurück", "Next":"Weiter", "Finish":"Fertigstellen", "Test connection":"Verbindung testen",
   "Test printer":"Drucker testen", "Testing…":"Teste…", "Skip":"Überspringen",
   "Database":"Datenbank", "Printer":"Drucker", "Plug, cloud & camera":"Steckdose, Cloud & Kamera",
+  "Stored in":"Gespeichert in",
+  "This follows the app folder - move the app and the file moves with it. Nothing else is written outside the database.":
+    "Das folgt dem App-Ordner – verschiebst du die App, wandert die Datei mit. Sonst wird außerhalb der Datenbank nichts geschrieben.",
   "Costs & filament":"Kosten & Filament", "Recording & safety":"Aufzeichnung & Sicherheit",
   "Recording":"Aufzeichnung", "Controls":"Steuerung",
   "How much is recorded, and what the app may do":"Wie viel aufgezeichnet wird – und was die App darf",
@@ -201,6 +204,23 @@ const DE = {
   "Allow assigning AMS slots":"AMS-Slots zuweisen erlauben","Allow sending G-code":"G-Code senden erlauben",
   "Telemetry sample interval (s)":"Messintervall (s)","Keep telemetry for (days)":"Messdaten aufbewahren (Tage)",
   "Keep recording after a print (min)":"Nachlauf nach dem Druck (min)",
+  "A counter that only goes up. Today and this month are worked out from it.":"Ein Zähler, der nur steigt. Heute und dieser Monat werden daraus berechnet.",
+  "Broker address":"Broker-Adresse",
+  "Broker password":"Broker-Passwort",
+  "Broker port":"Broker-Port",
+  "Broker user":"Broker-Benutzer",
+  "Broker uses TLS":"Broker nutzt TLS",
+  "Energy unit":"Energie-Einheit",
+  "Field: energy total":"Feld: Energie gesamt",
+  "Field: watts":"Feld: Watt",
+  "Key in the message holding the current draw. 'power' for Zigbee2MQTT; nested keys are written with dots.":"Schlüssel in der Nachricht mit der aktuellen Leistung. Bei Zigbee2MQTT „power“; verschachtelte Schlüssel mit Punkten.",
+  "Leave empty if the broker allows anonymous.":"Leer lassen, wenn der Broker anonym erlaubt.",
+  "Meter":"Messgerät",
+  "Power monitoring enabled":"Strommessung aktiv",
+  "The plug's own topic, e.g. zigbee2mqtt/printer. tools/sniff_power_mqtt.py lists what a broker is publishing.":"Das Topic der Steckdose, z. B. zigbee2mqtt/drucker. tools/sniff_power_mqtt.py zeigt, was ein Broker veröffentlicht.",
+  "Topic":"Topic",
+  "Where Zigbee2MQTT / Home Assistant publishes. Often the same machine as this app.":"Wo Zigbee2MQTT / Home Assistant veröffentlicht. Oft derselbe Rechner wie diese App.",
+  "tapo = TP-Link P110/P115 over WiFi. mqtt = anything publishing to a broker: Zigbee2MQTT (IKEA INSPELNING and other Zigbee plugs), Shelly, Tasmota, Home Assistant.":"tapo = TP-Link P110/P115 über WLAN. mqtt = alles, was an einen Broker sendet: Zigbee2MQTT (IKEA INSPELNING und andere Zigbee-Steckdosen), Shelly, Tasmota, Home Assistant.",
   "Smart plug enabled":"Smart Plug aktiv","Plug IP":"Plug-IP","Plug model":"Plug-Modell",
   "Tapo account":"Tapo-Konto","Tapo password":"Tapo-Passwort","Poll every (s)":"Abfrage alle (s)",
   "Bambu Cloud enabled":"Bambu Cloud aktiv","Bambu account":"Bambu-Konto","Bambu password":"Bambu-Passwort",
@@ -246,7 +266,8 @@ function control(f){
     return `<input type="checkbox" id="${id}" data-path="${esc(f.path)}"${v ? " checked" : ""}>`;
   if(f.kind === "select")
     return `<select id="${id}" data-path="${esc(f.path)}">${
-      f.options.map(o => `<option${o === v ? " selected" : ""}>${esc(o)}</option>`).join("")}</select>`;
+      f.options.map(o => `<option value="${esc(o)}"${o === v ? " selected" : ""}>${
+        esc(t((f.option_labels || {})[o] || o))}</option>`).join("")}</select>`;
   if(f.kind === "matrix" || f.kind === "pairs"){
     const num = f.kind === "matrix";
     const rows = Object.entries(v || {});
@@ -271,10 +292,18 @@ function mtxRow(k, v, num){
     <button type="button" class="btn small mtx-x" title="${esc(t("remove"))}">✕</button></div>`;
 }
 
+// the same dependency the Settings page honours: with the meter set to MQTT,
+// the Tapo boxes are not questions worth asking
+function visible(f){
+  if(!f.show_if) return true;
+  const [path, want] = f.show_if;
+  return String(val[path]) === String(want);
+}
+
 function schemaStep(key){
   let html = "", group = null;
-  for(const f of fieldsFor(key)){
-    if(f.group !== group && fieldsFor(key).some(x => x.group !== f.group)){
+  for(const f of fieldsFor(key).filter(visible)){
+    if(f.group !== group && fieldsFor(key).filter(visible).some(x => x.group !== f.group)){
       group = f.group;
       html += `<div class="grp">${esc(t(group))}</div>`;
     }
@@ -324,6 +353,10 @@ function dbStep(){
       <div class="row"><label>${esc(t("Database name"))}</label><div>
         <input type="text" id="dbName" value="${esc(m.database || "bambu_monitor")}"></div></div>
     </div>
+    <div class="row"><label>${esc(t("Stored in"))}</label><div>
+      <div class="note" style="margin-top:9px"><code>${esc(seed.config_path || "")}</code>
+      <div style="margin-top:5px">${esc(t("This follows the app folder - move the app and the file moves with it. Nothing else is written outside the database."))}</div>
+      </div></div></div>
     <div id="dbSqlite" class="${server ? "hide" : ""}">
       <div class="row"><label>${esc(t("File"))}</label><div>
         <input type="text" id="dbPath" value="${esc(db.sqlite_path || "telemetry.db")}">
@@ -465,6 +498,13 @@ $("stepBody").addEventListener("click", e=>{
   }
 });
 $("stepBody").addEventListener("change", e=>{
+  // a field others depend on: redraw so the right boxes appear at once
+  const p = e.target.dataset && e.target.dataset.path;
+  if(p && (seed.fields || []).some(f => f.show_if && f.show_if[0] === p)){
+    collect();
+    render();
+    return;
+  }
   if(e.target.id === "dbBackend"){
     const server = e.target.value !== "sqlite";
     $("dbMaria").classList.toggle("hide", !server);
