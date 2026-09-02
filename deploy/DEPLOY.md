@@ -1,130 +1,48 @@
-# Deploying Bambu Monitor to the Synology DS223
+# Deploying to a Synology NAS
 
-The app is one small Python process: it holds a local-MQTT subscription to the
-X2D and serves the dashboard on port **8770**, storing history in the Synology's
-**existing MariaDB** (the same server familien-wiki uses). MySQL works too, and
-is offered in the wizard — the app speaks one protocol to both. No Docker required.
+The install guide lives in the README, so there is only ever one copy of it to
+keep correct:
 
-Do the steps in order. Steps 1–5 are a one-time setup; after that the app
-auto-starts on boot.
+### → [Installing on a Synology NAS](../README.md#installing-on-a-synology-nas)
+
+This folder holds the pieces that guide refers to:
+
+| File | What it is |
+|---|---|
+| [`schema_and_user.sql`](schema_and_user.sql) | Creates the `bambu_monitor` database and a least-privilege `bambu` user. Run once, as the server's root user. The app creates its own tables. |
+| [`start.sh`](start.sh) | The launcher. Idempotent — starts the app only if it is not already running, so it doubles as the watchdog. `start.sh restart` kills the running instance and **waits for it to exit** before starting the new one. |
+| [`sqlite_to_mariadb.py`](sqlite_to_mariadb.py) | Moves an existing SQLite database onto MariaDB or MySQL. |
+| [`recalc_print_energy.py`](recalc_print_energy.py) | Recomputes stored per-print energy from the telemetry table. |
 
 ---
 
-## 0. Prerequisites (already true on your NAS)
-- **MariaDB 10** package installed and running (you use it for familien-wiki).
-- **phpMyAdmin** (optional but easiest for step 2), or SSH access.
+## Notes that only apply to a NAS
 
-## 1. Install Python 3
-Package Center → search **Python 3** → Install. (Any 3.9+ is fine.)
+- **`APP_DIR` in `start.sh`** is an absolute path, `/volume1/apps/bambu-monitor`.
+  Edit it if you install elsewhere; nothing else hardcodes a location.
+- **Use the Python 3 package's interpreter**, not `/bin/python3` — Synology ships
+  an older one there. The venv in the install guide takes care of this.
+- **MariaDB needs "Enable TCP/IP connection"** ticked in its package settings. The
+  app connects over TCP; without it the login fails with *Access denied* no matter
+  what the password is.
+- **The Flask server is fine** for single-user home use on a LAN. If you ever want
+  something hardened, `pip install waitress` and swap the last line of `app.py`.
+- **Backups:** the database holds the settings as well as the history, so your
+  normal MariaDB backup already covers the configuration. The only thing outside
+  it is `instance/db.json`, which is a handful of values you could retype in a
+  minute. For a copy that does not depend on the database being readable, see
+  [Backup and restore](../README.md#backup-and-restore).
 
-## 2. Create the database + user
-Open **phpMyAdmin** → SQL tab → paste the contents of
-[`schema_and_user.sql`](schema_and_user.sql), **after** replacing
-`REPLACE_WITH_STRONG_PASSWORD` with a password you choose. Run it.
+## Moving an existing SQLite database to MariaDB
 
-Then, in **Package Center → MariaDB 10 → open settings**, make sure
-**"Enable TCP/IP connection"** is ticked (port 3306) — the Python app connects
-over TCP, not the PHP socket.
+Stop the app, then:
 
-## 3. Copy the app onto the NAS
-Create a shared folder or reuse one, and copy the whole `bambu-monitor` folder to
-e.g. **`/volume1/apps/bambu-monitor`** (File Station drag-and-drop is fine).
-You need at least: `app.py`, `bambu_state.py`, `storage.py`, `filament_catalog.py`,
-`bootstrap.py`, `config_store.py`, `settings_schema.py`, `setup_wizard.py`,
-`dashboard.html`, `setup.html`, `requirements.txt`, `deploy/`.
-
-> There is no config file to copy. The app asks for everything on first run
-> (step 6) and stores it in the database; only the database connection ends up
-> on disk, in `instance/db.json`, which the wizard writes for you. Afterwards
-> everything is editable from the **Settings page** — the gear in the top right
-> of the dashboard.
-
-> If you put it somewhere other than `/volume1/apps/bambu-monitor`, edit `APP_DIR`
-> at the top of [`start.sh`](start.sh) to match.
-
-## 4. Create a virtualenv and install dependencies
-SSH into the NAS (Control Panel → Terminal & SNMP → Enable SSH), then:
 ```sh
 cd /volume1/apps/bambu-monitor
-python3 -m venv venv
-./venv/bin/python3 -m pip install --upgrade pip
-./venv/bin/python3 -m pip install -r requirements.txt
+./venv/bin/python3 deploy/sqlite_to_mariadb.py
 ```
 
-## 5. Run it, and answer the setup wizard
-```sh
-./venv/bin/python3 app.py
-```
-It will print `not configured yet`. From another device on your LAN, open
-**http://<NAS-IP>:8770** — you get the setup wizard rather than the dashboard:
-
-1. **Database** — MariaDB (or MySQL, if that is what you run), host `127.0.0.1`,
-   port `3306`, user `bambu`, the password from step 2, database
-   `bambu_monitor`. Press **Test connection**
-   before continuing; it opens the connection and checks it can create a table,
-   and says exactly what is wrong if it cannot.
-2. **Printer** — IP, serial and LAN access code, all from the printer's screen
-   under Settings › Network. **Test printer** confirms them.
-3. **Plug, cloud & camera** — optional, skip what you do not have.
-4. **Costs & filament** — electricity price and per-kg prices.
-5. **Recording & safety** — the defaults are fine.
-
-**Finish** writes `instance/db.json`, stores everything else in the database and
-restarts the app; the page reloads into the dashboard by itself. Press Ctrl+C to
-stop once you have confirmed live data.
-
-> Upgrading an existing install? Copy your old `printer.config.json` across too
-> and the wizard arrives prefilled from it, credentials included. On finish it
-> is renamed to `printer.config.json.imported` and never read again. To do it
-> without a browser: `./venv/bin/python3 tools/import_config.py --write`.
-
-> To change any of this later: the Settings page for everything except the
-> connection, and `./venv/bin/python3 app.py --setup` for that.
-
-> Port blocked? Control Panel → Security → Firewall: allow TCP **8770** (LAN only).
-
-## 6. Auto-start on boot (+ watchdog)
-Control Panel → **Task Scheduler**:
-1. **Create → Triggered Task → User-defined script**
-   - Task: `bambu-monitor start`, User: **root**, Event: **Boot-up**
-   - Task Settings → Run command:
-     `sh /volume1/apps/bambu-monitor/deploy/start.sh`
-2. **Create → Scheduled Task → User-defined script** (watchdog / auto-restart)
-   - User: **root**, Schedule: daily, **repeat every 5 minutes**
-   - Same command as above.
-
-`start.sh` is idempotent — the watchdog only relaunches the app if it has stopped.
-
-Run task #1 once now (select it → **Run**) so you don't have to reboot.
-
----
-
-## Updating later
-Copy changed files over, then Task Scheduler → select `bambu-monitor start` →
-there's no stop button, so kill it via SSH (`pkill -f app.py`); the 5-minute
-watchdog restarts it with the new code (or run task #1 manually).
-
-## Notes
-- The Flask dev server is fine for single-user home use on the LAN. If you ever
-  want a hardened server, `pip install waitress` and swap the last line of
-  `app.py` — not needed for now.
-- Backups: `bambu_monitor` is now part of your normal MariaDB backup, alongside
-  familien-wiki — and since the settings live there too, that backup now covers
-  the configuration as well. The only thing outside it is `instance/db.json`,
-  which is five values you could retype in a minute.
-
-  For a second copy that does not depend on the database being readable, add
-  a daily task (Task Scheduler > Create > Scheduled Task > User-defined
-  script, as root):
-
-  ```sh
-  /volume1/apps/bambu-monitor/venv/bin/python3 \
-      /volume1/apps/bambu-monitor/tools/backup.py export \
-      --out /volume1/backup/bambu --keep 30
-  ```
-
-  That writes one JSON file per run - prints, filaments, purchases, notes and
-  settings - and keeps the newest 30. Put `--out` somewhere Hyper Backup
-  already covers. Restore with `tools/backup.py restore <file>`, which is a
-  dry run until you add `--apply`, or from **Settings > Sicherung** in the
-  browser.
+It brings the destination schema up to date **first** (otherwise columns that do
+not exist there yet are silently dropped), then copies telemetry, prints, filament
+identities, acknowledgements and settings. Switch the connection over in
+`instance/db.json` — or re-run the wizard with `app.py --setup` — and restart.

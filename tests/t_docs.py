@@ -1,5 +1,5 @@
-"""The README's "Adding another backend" section is a map, and a map that
-points at the wrong place is worse than no map.
+"""docs/INTERNALS.md's "Adding another backend" section is a map, and a map
+that points at the wrong place is worse than no map.
 
 It cites file:line for every dialect-specific spot in storage.py, and it claims
 a count of them. Both rot the moment somebody inserts a line. This checks that
@@ -19,7 +19,7 @@ import io
 import re
 
 SRC = SRC_DIR + _os.sep
-readme = io.open(SRC + "README.md", encoding="utf-8").read()
+readme = io.open(SRC + "docs/INTERNALS.md", encoding="utf-8").read()
 store = io.open(SRC + "storage.py", encoding="utf-8").read()
 lines = store.split("\n")
 
@@ -43,16 +43,16 @@ CITED = {
 # A link's visible label names a line too, and the two rot independently: a
 # bulk update of the hrefs left "[storage.py:717](storage.py#L812)" behind,
 # which reads as one line and goes to another.
-for label, href in re.findall(r"\[(?:storage\.py)?:?(\d+)\]\(storage\.py#L(\d+)\)", sec):
+for label, href in re.findall(r"\[(?:storage\.py)?:?(\d+)\]\(\.\./storage\.py#L(\d+)\)", sec):
     assert label == href, (f"a link is labelled line {label} but points at line "
                            f"{href} - one of them is wrong")
 cited = {int(n) for n in re.findall(r"storage\.py#L(\d+)", sec)}
 assert cited == set(CITED), f"the section cites {sorted(cited)}, this test knows {sorted(CITED)}"
 for line, token in CITED.items():
     actual = lines[line - 1]
-    assert token in actual, (f"README sends the reader to storage.py:{line} for "
+    assert token in actual, (f"INTERNALS.md sends the reader to storage.py:{line} for "
                              f"{token!r}, but that line is: {actual.strip()[:60]!r}")
-print(f"all {len(CITED)} cited lines still contain what the README says they do")
+print(f"all {len(CITED)} cited lines still contain what INTERNALS.md says they do")
 
 # --- the claim that only five places are about dialect ---------------------
 # Everything else is lifecycle or row shape. If a sixth appears, the section is
@@ -69,17 +69,17 @@ decisions = {"auto": 'auto="', "blob": 'blob="',
 found = {k: store.count(v) for k, v in decisions.items()}
 for k, n in found.items():
     assert n, f"the {k} dialect decision has disappeared from storage.py"
-assert len(decisions) == 5, "this test no longer matches the table in the README"
-assert "**5**" in sec or "| **5** |" in sec, "the README no longer claims five"
+assert len(decisions) == 5, "this test no longer matches the table in INTERNALS.md"
+assert "**5**" in sec or "| **5** |" in sec, "INTERNALS.md no longer claims five"
 print("five dialect decisions, exactly as documented:", ", ".join(sorted(found)))
 
 # --- and the claim that nothing uses a MySQL-only upsert -------------------
 # The section rests on prints/filaments being hand-rolled UPDATE-then-INSERT.
 assert "ON DUPLICATE KEY" not in store.upper(), \
-    "storage.py now uses ON DUPLICATE KEY UPDATE; the README says it does not"
+    "storage.py now uses ON DUPLICATE KEY UPDATE; INTERNALS.md says it does not"
 assert "ON CONFLICT" not in store.upper(), \
-    "storage.py now uses ON CONFLICT; the README's portability claim is stale"
-print("no dialect-locked upsert beyond the two REPLACE INTO the README names")
+    "storage.py now uses ON CONFLICT; INTERNALS.md's portability claim is stale"
+print("no dialect-locked upsert beyond the two REPLACE INTO that are documented")
 
 # --- the six column types ---------------------------------------------------
 # Comments are stripped first: a type named in prose is not a column type, and
@@ -89,7 +89,7 @@ types = set(re.findall(r"\b(FLOAT|DOUBLE|TEXT|INTEGER|LONGBLOB|BLOB|BOOLEAN|"
                        r"TINYINT|DATETIME|TIMESTAMP|DECIMAL|JSON)\b", code))
 types -= {"BLOB"}          # the sqlite half of the _blob pair
 unexpected = types - {"FLOAT", "DOUBLE", "TEXT", "INTEGER", "LONGBLOB"}
-assert not unexpected, (f"the schema gained column types the README does not list: "
+assert not unexpected, (f"the schema gained column types INTERNALS.md does not list: "
                         f"{sorted(unexpected)} - a new backend now has more to answer for")
 print(f"schema still uses only {len(types)} column types plus VARCHAR(n)")
 print("ok")
