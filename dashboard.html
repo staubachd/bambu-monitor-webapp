@@ -638,6 +638,28 @@
   /* actual against the slicer's estimate: over is not a failure, so this is
      quiet rather than coloured like an error */
   .det .sl-vs{color:var(--text-3); font-family:inherit}
+
+  /* the printer's USB drive */
+  .drive-cap{margin:2px 0 16px}
+  .drive-bar{height:10px; border-radius:6px; background:var(--surface-2);
+    border:1px solid var(--border); overflow:hidden}
+  .drive-bar>span{display:block; height:100%; background:var(--accent);
+    border-radius:6px 0 0 6px}
+  .drive-cap-l{display:flex; gap:16px; margin-top:7px; font-size:12.5px;
+    flex-wrap:wrap}
+  .drive-cap-l span{color:var(--text-2)}
+  .drive-sum{font-size:12.5px; color:var(--text-3); margin:14px 0 8px}
+  .dtab{width:100%; border-collapse:collapse; font-size:12.5px}
+  .dtab th{text-align:left; font-weight:600; color:var(--text-3); padding:6px 10px 6px 0;
+    border-bottom:1px solid var(--border); white-space:nowrap}
+  .dtab td{padding:6px 10px 6px 0; border-bottom:1px solid var(--border);
+    vertical-align:top}
+  .dtab .num{text-align:right; font-variant-numeric:tabular-nums;
+    font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+  /* a sliced job is the row somebody is looking for; everything else on the
+     drive is the printer's own housekeeping */
+  .dtab tr.sliced .fn{font-weight:600}
+  .dtab .fn{overflow-wrap:anywhere}
   /* a print that never got an end time: the runaway duration is the symptom */
   .htab .dur{cursor:text; color:var(--warn)}
   .htab .dur:hover{text-decoration:underline dotted var(--warn); text-underline-offset:3px}
@@ -1239,6 +1261,19 @@
     </section>
   </div>
 
+  <!-- ============ PRINTER · USB drive ============ -->
+  <div class="dash view" id="v-printer-drive">
+    <section class="card span-12">
+      <div class="card-head">
+        <h3 data-i18n="USB drive">USB drive</h3>
+        <span class="meta" id="driveMeta"></span>
+        <button class="wbtn" id="driveRefresh" style="margin-left:auto"
+          data-i18n="Refresh">Refresh</button>
+      </div>
+      <div id="driveBody"></div>
+    </section>
+  </div>
+
   <!-- ============ PRINTER · Raw data ============ -->
   <div class="dash view" id="v-printer-raw">
     <section class="card span-12">
@@ -1559,6 +1594,24 @@ function toast(msg, bad){
    stage names, speed levels, AMS activity) are known English strings and get
    translated on display - no backend changes needed. */
 const DE = {
+  // the printer's USB drive
+  "USB drive":"USB-Stick", "Refresh":"Aktualisieren",
+  "Reading the drive…":"Lese den Stick…",
+  "Could not ask the app about the drive.":"Die App konnte nicht nach dem Stick gefragt werden.",
+  "Could not list the drive":"Der Stick konnte nicht gelesen werden",
+  "no drive in the printer":"kein Stick im Drucker",
+  "The printer reports no drive. Slicer data can only be read while one is plugged in.":"Der Drucker meldet keinen Stick. Slicer-Daten lassen sich nur lesen, solange einer steckt.",
+  "Nothing on the drive that the printer will show over the network.":"Auf dem Stick ist nichts, was der Drucker über das Netzwerk zeigt.",
+  "used":"belegt", "free":"frei", "total":"gesamt",
+  "as reported by the printer":"laut Drucker",
+  "visible over the network":"über das Netzwerk sichtbar",
+  "list shortened":"Liste gekürzt",
+  "file":"Datei", "files":"Dateien",
+  "File":"Datei", "Folder":"Ordner", "Print":"Druck", "Size":"Größe",
+  "Changed":"Geändert", "no print recorded":"kein Druck erfasst",
+  "The printer reports":"Der Drucker meldet",
+  "used, but only":"belegt, sichtbar sind aber nur",
+  "is visible over the network — the rest is content the printer does not share.":"– der Rest sind Inhalte, die der Drucker nicht freigibt.",
   // slicer metadata, read off the sliced file on the printer's drive
   "Slicer":"Slicer",
   "Read slicer data from the printer":"Slicer-Daten vom Drucker lesen",
@@ -1568,10 +1621,12 @@ const DE = {
   "Connection timeout (s)":"Zeitlimit der Verbindung (s)",
   "nothing read from the sliced file":"nichts aus der geslicten Datei gelesen",
   "Read it from the printer":"Vom Drucker lesen",
+  "Read it again":"Erneut lesen",
+  "if the file is still on the drive":"sofern die Datei noch auf dem Stick liegt",
   "Reading…":"Lese…",
   "Read from the sliced file":"Aus der geslicten Datei gelesen",
   "Could not read it.":"Konnte nicht gelesen werden.",
-  "Profile":"Profil", "Nozzle":"Düse", "First layer":"Erste Schicht",
+  "Plate":"Platte", "Profile":"Profil", "Nozzle":"Düse", "First layer":"Erste Schicht",
   "Infill":"Füllung", "Walls":"Wände", "Supports":"Stützen", "none":"keine",
   "Slicer weight":"Slicer-Gewicht", "Estimated":"Geschätzt",
   "typed in by hand":"von Hand eingetragen",
@@ -3128,6 +3183,9 @@ $("histTable").addEventListener("click", async e=>{
   if(dur){ startEditDur(dur); return; }
   const slr = e.target.closest("button.sl-read");
   if(slr){
+    // the button says different things depending on whether there is already a
+    // block to refresh, so put back whatever it said rather than one of them
+    const was = slr.textContent;
     slr.disabled = true; slr.textContent = t("Reading…");
     let d = null;
     try{
@@ -3140,7 +3198,7 @@ $("histTable").addEventListener("click", async e=>{
       // the reason matters here: "no drive in the printer" and "switched off"
       // need different things done about them
       toast(t("Could not read it.") + (d && d.error ? " (" + t(d.error) + ")" : ""), true);
-      slr.disabled = false; slr.textContent = t("Read it from the printer");
+      slr.disabled = false; slr.textContent = was;
     }
     return;
   }
@@ -3373,6 +3431,7 @@ function sliceBlock(r){
   return `<div>
     <h4>${t("Slicer")}</h4>
     <div class="dl">
+      ${s.plate_name ? line("Plate", esc(s.plate_name)) : ""}
       ${s.profile ? line("Profile", esc(s.profile)) : ""}
       ${s.nozzle_mm != null ? line("Nozzle", s.nozzle_mm + " mm") : ""}
       ${s.first_layer_h != null ? line("First layer", fmtLH(s.first_layer_h)) : ""}
@@ -3385,6 +3444,9 @@ function sliceBlock(r){
           + (ran ? ` <span class="sl-vs">(${ran > est ? "+" : ""}${
               Math.round(ran - est)} min)</span>` : "")) : ""}
     </div>
+    <button class="wbtn sl-read" type="button" data-job="${esc(r.job_id)}"
+      style="margin-top:9px" title="${t("if the file is still on the drive")}">${
+      t("Read it again")}</button>
   </div>`;
 }
 function fmtMin(m){
@@ -3418,8 +3480,8 @@ function detailRow(r, cur){
             title="${t("click to edit")}">${
             lhOf(r) != null ? fmtLH(lhOf(r)) + (r.layer_h_manual != null ? " *" : "")
                             : t("not noted")}</span>`)}
-        ${lhOf(r) != null && r.total_layers
-            ? line("Model height", (lhOf(r) * r.total_layers).toFixed(1) + " mm") : ""}
+        ${(r.slice || {}).height_mm != null
+            ? line("Model height", r.slice.height_mm.toFixed(2) + " mm") : ""}
         ${r.error_code ? line("Error", esc(r.error_code)) : ""}
       </div>
     </div>
@@ -5210,6 +5272,110 @@ const BACKEND_LABEL = {mariadb: "MariaDB", mysql: "MySQL", sqlite: "SQLite"};
    printer does not keep it, the cloud keeps a rolling window, and every cost
    figure on the page is derived from it. So: one file, downloadable, and a
    restore that shows what it is about to do BEFORE it does it. */
+/* ---------- the printer's USB drive ---------- */
+// Two sources that must not be blended into one number. The printer reports how
+// full the drive is (it is the only thing that knows its capacity - FTP can
+// list a drive but has no command for its size). FTP reports what is on it. On
+// a real drive those disagreed by 6 GB, because the FTP view does not
+// necessarily show everything the drive holds. Presenting the difference as
+// "other files" would be inventing an explanation, so each figure is labelled
+// with where it came from and the gap is left visible.
+// One formatter, because two of them printing the same quantity to different
+// precision is how "6.0 GB" and "6.01 GB" end up on the same screen looking
+// like different figures.
+function bytes(v){
+  if(v == null) return "—";
+  if(v >= 1024**3) return (v/1024**3).toFixed(1) + " GB";
+  if(v >= 1024**2) return (v/1024**2).toFixed(1) + " MB";
+  if(v >= 1024) return Math.round(v/1024) + " KB";
+  return v + " B";
+}
+function kb(v){ return v == null ? "—" : bytes(v * 1024); }
+let driveBusy = false;
+async function loadDrive(refresh){
+  if(driveBusy) return;
+  driveBusy = true;
+  const body = $("driveBody"), meta = $("driveMeta");
+  if(!body.dataset.loaded) body.innerHTML =
+    `<div class="none" style="padding:10px 0">${t("Reading the drive…")}</div>`;
+  meta.textContent = t("Reading the drive…");
+  let d = null;
+  try{ d = await (await fetch("/api/storage" + (refresh ? "?refresh=1" : ""))).json(); }
+  catch(_){}
+  driveBusy = false;
+  if(!d){
+    meta.textContent = "";
+    body.innerHTML = `<div class="none">${t("Could not ask the app about the drive.")}</div>`;
+    return;
+  }
+  body.dataset.loaded = "1";
+  renderDrive(d);
+}
+function renderDrive(d){
+  const st = d.storage || {}, ext = st.external;
+  const meta = $("driveMeta");
+  meta.textContent = st.present ? "" : t("no drive in the printer");
+  const parts = [];
+
+  // --- how full, as the printer sees it ---
+  if(ext && ext.total_kb){
+    const pct = Math.max(0, Math.min(100, (ext.used_kb / ext.total_kb) * 100));
+    parts.push(`<div class="drive-cap">
+      <div class="drive-bar"><span style="width:${pct.toFixed(1)}%"></span></div>
+      <div class="drive-cap-l">
+        <span><b>${kb(ext.used_kb)}</b> ${t("used")}</span>
+        <span>${kb(ext.free_kb)} ${t("free")}</span>
+        <span>${kb(ext.total_kb)} ${t("total")}</span>
+      </div>
+      <div class="meta">${t("as reported by the printer")}</div>
+    </div>`);
+  } else if(!st.present){
+    parts.push(`<div class="none">${t("The printer reports no drive. Slicer data can only be read while one is plugged in.")}</div>`);
+  }
+
+  // --- what is on it, as FTP sees it ---
+  if(d.error){
+    parts.push(`<div class="none" style="margin-top:12px">${t("Could not list the drive")}: ${esc(d.error)}</div>`);
+  } else {
+    const files = d.files || [];
+    if(!files.length){
+      parts.push(`<div class="none" style="margin-top:12px">${t("Nothing on the drive that the printer will show over the network.")}</div>`);
+    } else {
+      parts.push(`<div class="drive-sum">${files.length} ${
+        t(files.length === 1 ? "file" : "files")} · ${bytes(d.listed_bytes)} ${
+        t("visible over the network")}${
+        d.truncated ? " · " + t("list shortened") : ""}</div>`);
+      parts.push(`<table class="dtab"><thead><tr>
+          <th data-i18n="File">${t("File")}</th>
+          <th data-i18n="Folder">${t("Folder")}</th>
+          <th data-i18n="Print">${t("Print")}</th>
+          <th class="num" data-i18n="Size">${t("Size")}</th>
+          <th data-i18n="Changed">${t("Changed")}</th>
+        </tr></thead><tbody>${files.map(f=>`<tr${
+            f.sliced ? ' class="sliced"' : ""}>
+          <td class="fn" title="${esc(f.path)}">${esc(f.name)}</td>
+          <td class="meta">${esc(f.dir)}</td>
+          <td>${f.print ? esc(f.print) : `<span class="meta">${
+              f.sliced ? t("no print recorded") : "—"}</span>`}</td>
+          <td class="num">${bytes(f.size)}</td>
+          <td class="meta">${esc(f.when || "")}</td>
+        </tr>`).join("")}</tbody></table>`);
+    }
+    // the two figures come from different places and can disagree; say so
+    // rather than quietly presenting one of them as the truth
+    if(ext && ext.used_kb != null && d.listed_bytes != null){
+      const gap = ext.used_kb * 1024 - d.listed_bytes;
+      if(gap > 50 * 1024 * 1024){
+        parts.push(`<div class="meta" style="margin-top:10px">${
+          t("The printer reports")} ${kb(ext.used_kb)} ${t("used, but only")} ${
+          bytes(d.listed_bytes)} ${t("is visible over the network — the rest is content the printer does not share.")}</div>`);
+      }
+    }
+  }
+  $("driveBody").innerHTML = parts.join("");
+}
+$("driveRefresh").addEventListener("click", ()=> loadDrive(true));
+
 function renderBackup(){
   $("setGroups").innerHTML = `<div class="sub-sec">
     <div class="set-field"><div class="set-row">
@@ -5440,7 +5606,7 @@ $("setSave").addEventListener("click", async ()=>{
    the routing and the address bar, so a view cannot exist in one and be missing
    from another. The hash makes every view linkable and the back button work. */
 const NAV = {
-  printer:  [["now","Now"], ["machine","Hardware"], ["raw","Raw data"]],
+  printer:  [["now","Now"], ["machine","Hardware"], ["drive","USB drive"], ["raw","Raw data"]],
   prints:   [["history","History"], ["statistics","Statistics"]],
   filament: [["inventory","Inventory"], ["purchases","Purchases"]],
   workshop: [["maintenance","Maintenance"], ["notes","Notes"]],
@@ -5457,6 +5623,7 @@ const ON_SHOW = {
   // charts keep fixed viewBox coordinates while hidden, but a redraw after the
   // view is visible keeps their hover geometry honest
   "printer/now":        ()=>{ drawChart(); drawPowerChart(); },
+  "printer/drive":      ()=>{ loadDrive(); },
   "prints/history":     ()=>{ loadPrints(); loadStats(); },
   "prints/statistics":  ()=>{ loadStats(); },
   "filament/inventory": ()=>{ loadFilaments(); },

@@ -54,6 +54,15 @@ if (!navSrc) throw new Error("no NAV map in the page script");
 const NAV = {};
 for (const m of (navSrc[1] + "\n").matchAll(/(\w+):\s*\[(.*?)\],?\n/g))
   NAV[m[1]] = [...m[2].matchAll(/\["(\w+)","([^"]+)"\]/g)].map(x => [x[1], x[2]]);
+// The regex above reads one section per line. A section split across two lines
+// parses as nothing, and the next check then blames the markup for a view that
+// "NAV does not list" - which sends you looking in entirely the wrong place.
+for (const m of navSrc[1].matchAll(/^\s*(\w+):\s*\[/gm)) {
+  if (!(NAV[m[1]] || []).length) {
+    throw new Error(`NAV section "${m[1]}" parsed as no views. Each section has `
+      + `to be on one line: this reader takes a line at a time.`);
+  }
+}
 const views = Object.entries(NAV).flatMap(([s, vs]) => vs.map(([v]) => `${s}/${v}`));
 if (views.length < 8) throw new Error(`only ${views.length} views parsed from NAV`);
 

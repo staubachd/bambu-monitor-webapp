@@ -33,6 +33,8 @@ store = app.store
 SAMPLES = os.path.join(SRC_DIR, "samples")
 PS = open(os.path.join(SAMPLES, "project_settings.config"), "rb").read()
 SI = open(os.path.join(SAMPLES, "slice_info.config"), "rb").read()
+MS = open(os.path.join(SAMPLES, "model_settings.config"), "rb").read()
+HD = open(os.path.join(SAMPLES, "plate_header.gcode"), "rb").read()
 
 # --- the parser, against what the printer actually wrote --------------------
 meta = gcode_meta.parse(PS, SI)
@@ -53,6 +55,48 @@ assert meta["object"] == "Oberteil 'groß` Herz", (
     "the object name did not survive - it is UTF-8 and must not be 'fixed'")
 print("real capture parsed:", meta["profile"], "/", meta["layer_h"], "mm /",
       meta["grams"], "g")
+
+# --- the model's height is measured, never multiplied out -------------------
+# This is the bug the header exists to fix. The profile says 0.12 mm and the
+# print ran 767 layers, so the arithmetic says 92.04 mm. The plate used a height
+# range modifier - layer steps from 0.012 to 0.12 - and it is 65.96 mm. A number
+# that is wrong by 40% and looks authoritative is worse than no number.
+full = gcode_meta.parse(PS, SI, MS, HD)
+assert full["height_mm"] == 65.96, full.get("height_mm")
+assert full["layers"] == 767, full.get("layers")
+assert abs(full["layers"] * full["layer_h"] - full["height_mm"]) > 25, (
+    "the sample no longer shows the variable-layer-height case it was captured "
+    "for, so this test has stopped guarding anything")
+assert full["slot"] == 5 and full["metres"] == 16.3, full
+# the header and slice_info agree where they overlap, so the header fills gaps
+assert full["grams"] == 49.41
+print(f"height read from the file: {full['height_mm']} mm, where "
+      f"{full['layers']} x {full['layer_h']} would have claimed "
+      f"{full['layers'] * full['layer_h']:.2f} mm")
+
+# --- the plate name, which nothing else in the app has ever known -----------
+assert full["plate_name"] == "Oberteil 'groß` Herz", full.get("plate_name")
+# plate 9 in the same project is called something else entirely: the plate name
+# is not the object name, which is why it is worth reading
+assert gcode_meta.parse_plate_name(MS, 9) == "Oberteile blanko"
+assert gcode_meta.parse_plate_name(MS, 999) is None, "a plate that is not there got a name"
+assert gcode_meta.parse_plate_name(MS, None) is None
+assert gcode_meta.parse_plate_name(b"<not xml", 15) is None, "junk XML was not survived"
+assert "plate_name" not in gcode_meta.parse(PS, SI), \
+    "a plate name appeared without model_settings being read"
+print("plate 15 is", repr(full["plate_name"]), "and plate 9 is 'Oberteile blanko'")
+
+# --- the header degrades like everything else ------------------------------
+assert gcode_meta.parse_header(None) == {}
+assert gcode_meta.parse_header(b"; nothing useful here") == {}
+assert gcode_meta.parse_header(b"; max_z_height: not-a-number") == {}
+# the slot line must not be confused with the two filament_ lines above it
+assert gcode_meta.parse_header(
+    b"; filament_density: 1.32,1.26\n; filament_diameter: 1.75\n"
+    b"; filament: 5\n")["slot"] == 5
+assert "height_mm" not in gcode_meta.parse(PS, SI), \
+    "a height appeared without the gcode header being read"
+print("no header, a junk header, or a truncated one all degrade to less")
 
 # --- supports: two keys, and only one of them is the switch ----------------
 d = json.loads(PS.decode())
@@ -81,7 +125,7 @@ except gcode_meta.SlicerError:
     pass
 # a slicer that stops writing a key must not take the rest down with it
 thin = gcode_meta.parse(json.dumps({"layer_height": "0.2"}).encode(), None)
-assert thin == {"layer_h": 0.2}, thin
+assert thin == {"layer_h": 0.2, "v": gcode_meta.FORMAT}, thin
 assert "nil" not in str(gcode_meta.parse(
     json.dumps({"layer_height": "nil", "wall_loops": "0"}).encode(), None))
 print("a missing member, junk, or a dropped key degrades to less, never to a crash")
@@ -101,7 +145,15 @@ def build_3mf():
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("Metadata/plate_15.png", b"\x89PNG" + b"\0" * 20000)
         z.writestr(gcode_meta.SETTINGS_MEMBER, PS)
-        z.writestr("Metadata/plate_15.gcode", BIG)
+        # the header first, then the incompressible bulk, exactly as the real
+        # file is laid out - so reading a prefix is a real prefix read
+        z.writestr("Metadata/plate_15.gcode", HD + BIG)
+        # A decoy that sorts BEFORE plate_15 both lexically and numerically, so
+        # "just take the first .gcode member" cannot pass by luck. It did once:
+        # with plate_9 as the decoy, sorting put plate_15 first anyway and the
+        # test went green with the plate check deleted.
+        z.writestr("Metadata/plate_1.gcode", b"; a different plate\n" + BIG[:1000])
+        z.writestr(gcode_meta.MODEL_MEMBER, MS)
         z.writestr(gcode_meta.SLICE_MEMBER, SI)
     return buf.getvalue()
 
@@ -153,15 +205,32 @@ class FakeFTP:
 
 ftp = FakeFTP(BLOB)
 members, pulled = gcode_meta.read_members(ftp, "job.gcode.3mf", len(BLOB))
-assert gcode_meta.SETTINGS_MEMBER in members and gcode_meta.SLICE_MEMBER in members
-assert gcode_meta.parse(members[gcode_meta.SETTINGS_MEMBER],
-                        members[gcode_meta.SLICE_MEMBER])["layer_h"] == 0.12
+for m in (gcode_meta.SETTINGS_MEMBER, gcode_meta.SLICE_MEMBER,
+          gcode_meta.MODEL_MEMBER, gcode_meta.HEADER_KEY):
+    assert m in members, f"{m} was not read"
+# the file holds two plates' gcode; slice_info says 15, so plate 9's must not be
+# the one the header comes from
+assert b"a different plate" not in members[gcode_meta.HEADER_KEY], (
+    "the header was taken from the wrong plate's gcode")
+got = gcode_meta.parse(members[gcode_meta.SETTINGS_MEMBER],
+                       members[gcode_meta.SLICE_MEMBER],
+                       members[gcode_meta.MODEL_MEMBER],
+                       members[gcode_meta.HEADER_KEY])
+assert got["layer_h"] == 0.12 and got["height_mm"] == 65.96, got
+assert got["plate_name"] == "Oberteil 'groß` Herz", got
 assert pulled < len(BLOB) / 4, (
     f"pulled {pulled:,} of {len(BLOB):,} bytes - the whole point is to read the "
     f"index and two small members, not the job")
 assert pulled < 400 * 1024, f"pulled {pulled:,} bytes, which is not 'a little'"
-# and specifically: the gcode itself never crossed the wire
-assert BIG[:200] not in b"".join(members.values())
+# The gcode's first few kilobytes ARE read now - that is where max_z_height is.
+# What must never happen is reading the rest of it: a prefix is bounded, the
+# member is not.
+assert len(members[gcode_meta.HEADER_KEY]) <= gcode_meta.HEADER_BYTES, (
+    f"kept {len(members[gcode_meta.HEADER_KEY]):,} bytes of gcode; the header "
+    f"block is a few hundred and the member is megabytes")
+assert BIG[-200:] not in b"".join(members.values()), (
+    "the whole gcode member was decompressed to get at a header that is in the "
+    "first 500 bytes of it")
 print(f"read {pulled:,} bytes of a {len(BLOB):,}-byte file "
       f"({pulled / len(BLOB) * 100:.1f}%) in {len(ftp.ranges)} ranged transfer(s)")
 
@@ -295,6 +364,32 @@ try:
 finally:
     gcode_meta.fetch = saved
 print("the slicer's weight fills a gap and never overwrites one that is there")
+
+# --- a block written by an older parser is read again ----------------------
+# This one shipped broken. The plate name was added, and every print already
+# recorded kept a block without it - for ever, because "has a block" was the
+# test for "nothing to do". The file is still on the drive; re-reading it costs
+# one bounded fetch. A version stamp is what makes that decidable.
+assert gcode_meta.parse(PS, SI)["v"] == gcode_meta.FORMAT, "blocks are not stamped"
+app._slicer_tries.clear()
+store.upsert_print(job_id="sl-old", name="old.3mf", started_at=time.time() - 900,
+                   ended_at=time.time() - 300, final_state="FINISH", total_layers=9)
+store.update_print_fields("sl-old", slice_json=json.dumps({"layer_h": 0.2}))
+assert app._slice_stamp(store.get_print("sl-old")) == 1, (
+    "a block written before the stamp existed is not treated as version 1")
+assert any(r["job_id"] == "sl-old" for r in app._slicer_pending(limit=200)), (
+    "a print read by an older parser is never read again, so a field added "
+    "later reaches new prints only and the old ones silently lack it")
+store.update_print_fields(
+    "sl-old", slice_json=json.dumps({"layer_h": 0.2, "v": gcode_meta.FORMAT}))
+assert app._slice_stamp(store.get_print("sl-old")) == gcode_meta.FORMAT
+assert not any(r["job_id"] == "sl-old" for r in app._slicer_pending(limit=200)), (
+    "a print already read by THIS parser is read again anyway - that is a poll")
+# junk in the column must not make a print permanently pending or permanently done
+store.update_print_fields("sl-old", slice_json="{not json")
+assert app._slice_stamp(store.get_print("sl-old")) == 1
+print(f"blocks are stamped v{gcode_meta.FORMAT}; older ones are re-read, current "
+      f"ones are left alone")
 
 # --- a print it cannot read is not retried for ever ------------------------
 app._slicer_tries.clear()

@@ -10,17 +10,25 @@ The X2D writes that file to a USB drive and serves it over FTPS. It is a ZIP
 
     Metadata/project_settings.config      94 KB  (13.6 KB stored)   581 settings
     Metadata/slice_info.config           1.8 KB  (650 b stored)     this plate
-    Metadata/plate_15.gcode             11.2 MB  (2.9 MB stored)    not needed
+    Metadata/model_settings.config        10 KB  (702 b stored)     plate names
+    Metadata/plate_15.gcode             11.2 MB  (2.9 MB stored)    first 4 KB
 
-**The gcode member is never read.** A ZIP is readable backwards - the index is
-at the end, and each member can be fetched on its own - and FTP has REST, which
-starts a transfer at an offset. Driving zipfile through a seekable FTP-REST file
-gets both config members in about 80 KB, whatever the size of the job. Measured
-against a 3.8 MB file: 81,146 bytes, five transfers, 1.4 s. On a twelve-plate
-project of 150 MB it would still be about 80 KB.
+**The bulk of the gcode is never read.** A ZIP is readable backwards - the index
+is at the end, and each member can be fetched on its own - and FTP has REST,
+which starts a transfer at an offset. Driving zipfile through a seekable
+FTP-REST file gets the three config members, plus the gcode's own header block,
+in about 150 KB whatever the size of the job. Measured against two real files:
+149,429 bytes of 4,365,743 and 156,094 of 3,832,815, under four seconds each. On
+a twelve-plate project of 150 MB it would still be about 150 KB.
 
 That matters more than it looks. Downloading whole jobs on a timer is how a NAS
 disk never sleeps, and this app has been bitten by exactly that once already.
+
+The gcode header earns its read: `project_settings` gives the profile's nominal
+layer height, and multiplying that by the layer count is the model's height only
+while every layer is that height. A height range modifier breaks it - one real
+print here ran 767 layers of a "0.12mm" profile, 92.04 mm by arithmetic and
+65.96 mm in fact. `max_z_height` is measured, so it is the one to believe.
 
 Three things learned the hard way against the real printer, all of them load-
 bearing:
@@ -49,12 +57,27 @@ import zipfile
 
 SUFFIX = ".gcode.3mf"
 
-# Where the two members live inside the 3MF.
+# What this parser knows how to extract. Stamped into every block it produces,
+# so that a print read by an older version can be spotted and read again: the
+# file is still on the drive, and re-reading it costs one bounded fetch. Without
+# this, adding a field only ever reaches prints made after the upgrade, and the
+# ones already recorded keep a block that silently lacks it - which is exactly
+# what happened when the plate name arrived.
+#   1  layer height, profile, infill, supports, weight, estimate
+#   2  + plate name, model height, layer count and slot from the gcode header
+FORMAT = 2
+
+# Where the members we read live inside the 3MF.
 SETTINGS_MEMBER = "Metadata/project_settings.config"
 SLICE_MEMBER = "Metadata/slice_info.config"
+MODEL_MEMBER = "Metadata/model_settings.config"     # the plate names, 10 KB
+# ...plus the first few kilobytes of the plate's gcode, under this key. Not a
+# member name, because which member it is depends on the plate.
+HEADER_KEY = "#header"
+HEADER_BYTES = 4096
 
 # A ceiling on what one fetch may pull, as a last line of defence. The ranged
-# read makes this unreachable in normal operation (~80 KB); it exists so that a
+# read makes this unreachable in normal operation (~150 KB); it exists so that a
 # file this code misreads can never turn into an unbounded download.
 MAX_PULL = 4 * 1024 * 1024
 
@@ -146,6 +169,68 @@ def sliced_files(ftp) -> list[dict]:
         out.append({"name": name, "size": size, "mtime": _mtime(ftp, name)})
     out.sort(key=lambda f: f["mtime"] or 0, reverse=True)
     return out
+
+
+def list_drive(ftp, path: str = "/", max_depth: int = 3,
+               max_entries: int = 2000) -> tuple[list[dict], bool]:
+    """Everything on the drive, as a flat list of files with their folder.
+
+    Bounded on purpose. A drive is somebody else's filesystem and can hold
+    anything - a deep tree, or thousands of timelapse frames - and this runs
+    while a print may be going on. Depth and count are capped, and the caller is
+    told when the cap was hit rather than being handed a quietly short list.
+
+    `LIST -a`, because a plain LIST of an empty directory and a LIST that failed
+    look identical, which cost an evening once.
+    """
+    out: list[dict] = []
+    truncated = [False]
+
+    def walk(where: str, depth: int):
+        if len(out) >= max_entries:
+            truncated[0] = True
+            return
+        rows: list[str] = []
+        try:
+            ftp.retrlines(f"LIST -a {where}", rows.append)
+        except Exception:
+            return          # an unreadable folder is not a failed listing
+        for line in rows:
+            if len(out) >= max_entries:
+                truncated[0] = True
+                return
+            parts = line.split(maxsplit=8)
+            if len(parts) < 9:
+                continue
+            perms, name = parts[0], parts[8]
+            if name in (".", ".."):
+                continue
+            full = where.rstrip("/") + "/" + name
+            if perms.startswith("d"):
+                if depth < max_depth:
+                    walk(full, depth + 1)
+                else:
+                    truncated[0] = True
+                continue
+            try:
+                size = int(parts[4])
+            except ValueError:
+                continue
+            out.append({
+                "name": name,
+                "dir": where if where != "/" else "/",
+                "path": full,
+                "size": size,
+                # the listing's own date, rather than an MDTM per file: one
+                # round trip each would turn a directory of 200 into 200 more
+                # commands, on a printer that may be printing
+                "when": " ".join(parts[5:8]),
+                "sliced": name.lower().endswith((".3mf", ".gcode")),
+            })
+
+    walk(path, 0)
+    out.sort(key=lambda f: -f["size"])
+    return out, truncated[0]
 
 
 def _mtime(ftp, name: str) -> float | None:
@@ -249,8 +334,26 @@ class RemoteZip(io.RawIOBase):
         return n
 
 
+def _gcode_member(names: set, slice_raw: bytes | None) -> str | None:
+    """Which plate's gcode belongs to this job.
+
+    The file can carry thumbnails for every plate in the project - eighteen of
+    them in one real case - but only the sliced plate's gcode. slice_info names
+    the plate, so ask it rather than assuming there is only one.
+    """
+    plate = None
+    if slice_raw:
+        m = re.search(rb'key="index" value="(\d+)"', slice_raw)
+        if m:
+            plate = int(m.group(1))
+    if plate is not None and f"Metadata/plate_{plate}.gcode" in names:
+        return f"Metadata/plate_{plate}.gcode"
+    only = [n for n in names if n.endswith(".gcode")]
+    return only[0] if len(only) == 1 else None
+
+
 def read_members(ftp, name: str, size: int, reconnect=None) -> tuple[dict, int]:
-    """The two config members of one sliced file, plus the bytes it cost."""
+    """The members of one sliced file worth reading, plus the bytes it cost."""
     rz = RemoteZip(ftp, name, size, reconnect=reconnect)
     try:
         z = zipfile.ZipFile(rz)
@@ -258,9 +361,20 @@ def read_members(ftp, name: str, size: int, reconnect=None) -> tuple[dict, int]:
         if SETTINGS_MEMBER not in names and SLICE_MEMBER not in names:
             raise SlicerError(f"{name} has no slicer metadata in it")
         out = {}
-        for member in (SETTINGS_MEMBER, SLICE_MEMBER):
+        for member in (SETTINGS_MEMBER, SLICE_MEMBER, MODEL_MEMBER):
             if member in names:
                 out[member] = z.read(member)
+        # The gcode's own header block, which is the resolved truth for this
+        # plate rather than the profile's nominal values. Only the first few
+        # kilobytes are decompressed: the member itself is 11 MB, and stopping
+        # after 4 KB costs one more ranged read of the archive.
+        gname = _gcode_member(names, out.get(SLICE_MEMBER))
+        if gname:
+            try:
+                with z.open(gname) as fh:
+                    out[HEADER_KEY] = fh.read(HEADER_BYTES)
+            except Exception:
+                pass       # a bonus; everything else in the file still stands
     except SlicerError:
         raise
     except Exception as e:
@@ -295,7 +409,63 @@ def _s(v):
     return s or None
 
 
-def parse(settings_raw: bytes | None, slice_raw: bytes | None) -> dict:
+def parse_header(raw: bytes | None) -> dict:
+    """The gcode's HEADER_BLOCK: what the slicer resolved for THIS plate.
+
+    Worth the extra ranged read for one field. `project_settings` gives the
+    profile's *nominal* layer height, and multiplying that by the layer count
+    is only the model's height while every layer is that height. The moment a
+    height range modifier is used it is not: one real print here ran 767 layers
+    of a "0.12mm High Quality" profile - 92.04 mm by multiplication - and was
+    actually 65.96 mm, with layer steps from 0.012 to 0.12. `max_z_height` is
+    measured rather than assumed, so it is the only honest source.
+    """
+    if not raw:
+        return {}
+    text = raw.decode("utf-8", "replace").split("HEADER_BLOCK_END")[0]
+    out = {}
+
+    def grab(key, pattern, cast=float):
+        m = re.search(pattern, text, re.M)
+        if m:
+            try:
+                out[key] = cast(m.group(1))
+            except ValueError:
+                pass
+
+    grab("height_mm", r"max_z_height:\s*([\d.]+)")
+    grab("layers", r"total layer number:\s*(\d+)", int)
+    grab("grams", r"total filament weight \[g\]\s*:\s*([\d.]+)")
+    grab("metres", r"total filament length \[mm\]\s*:\s*([\d.]+)",
+         lambda s: round(float(s) / 1000.0, 2))
+    # "; filament: 5" - the slot that printed it. The trailing colon matters:
+    # filament_density and filament_diameter sit two lines above it.
+    grab("slot", r"^; filament:\s*(\d+)\s*$", int)
+    return out
+
+
+def parse_plate_name(model_raw: bytes | None, plate: int | None) -> str | None:
+    """The name you gave this plate in the slicer.
+
+    A project can hold many plates with names of their own - "Oberteile Herz",
+    "blanko für Lichterkette" - which is what somebody printing a series calls
+    the job, and nothing else in the app has ever known it.
+    """
+    if not model_raw or not plate:
+        return None
+    try:
+        root = ET.fromstring(model_raw.decode("utf-8", "replace"))
+    except ET.ParseError:
+        return None
+    for p in root.findall("plate"):
+        meta = {m.get("key"): m.get("value") for m in p.findall("metadata")}
+        if str(meta.get("plater_id") or "") == str(plate):
+            return _s(meta.get("plater_name"))
+    return None
+
+
+def parse(settings_raw: bytes | None, slice_raw: bytes | None,
+          model_raw: bytes | None = None, header_raw: bytes | None = None) -> dict:
     """The handful of facts worth keeping, from the two config members.
 
     Returns a flat dict. Every value is optional: a slicer that stops writing a
@@ -362,7 +532,21 @@ def parse(settings_raw: bytes | None, slice_raw: bytes | None) -> dict:
                 if item.get("key") == "X-BBL-Client-Version":
                     out["slicer"] = _s(item.get("value"))
 
-    return {k: v for k, v in out.items() if v is not None}
+    # The gcode header last, and only for what nothing else knows. Where both
+    # have a figure they have agreed exactly (49.41 g in both), so this fills
+    # gaps rather than arguing with slice_info.
+    for k, v in parse_header(header_raw).items():
+        out.setdefault(k, v)
+
+    out["plate_name"] = parse_plate_name(model_raw, out.get("plate"))
+
+    out = {k: v for k, v in out.items() if v is not None}
+    # Only a block that actually says something is stamped. Stamping an empty
+    # one would record "read by the current parser" for a print nothing was
+    # learned about, and it would never be looked at again.
+    if out:
+        out["v"] = FORMAT
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -418,7 +602,8 @@ def fetch(ip: str, access_code: str, subtask: str | None = None,
                 if subtask else "no sliced file on the drive")
         raw, pulled = read_members(ftp, chosen["name"], chosen["size"],
                                    reconnect=_dial)
-        meta = parse(raw.get(SETTINGS_MEMBER), raw.get(SLICE_MEMBER))
+        meta = parse(raw.get(SETTINGS_MEMBER), raw.get(SLICE_MEMBER),
+                     raw.get(MODEL_MEMBER), raw.get(HEADER_KEY))
         if plate and meta.get("plate") and int(meta["plate"]) != int(plate):
             raise SlicerError(
                 f"{chosen['name']} holds plate {meta['plate']}, but this print "
@@ -436,15 +621,23 @@ def fetch(ip: str, access_code: str, subtask: str | None = None,
 
 if __name__ == "__main__":       # a self-test against the captured sample
     import os
-    here = os.path.dirname(os.path.abspath(__file__))
-    with open(os.path.join(here, "samples", "project_settings.config"), "rb") as fh:
-        ps = fh.read()
-    with open(os.path.join(here, "samples", "slice_info.config"), "rb") as fh:
-        si = fh.read()
-    got = parse(ps, si)
+    here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "samples")
+
+    def _read(n):
+        with open(os.path.join(here, n), "rb") as fh:
+            return fh.read()
+
+    got = parse(_read("project_settings.config"), _read("slice_info.config"),
+                _read("model_settings.config"), _read("plate_header.gcode"))
     for k, v in sorted(got.items()):
         print(f"  {k:<16} {v}")
     assert got["layer_h"] == 0.12, got
     assert got["grams"] == 49.41, got
     assert got["plate"] == 15, got
+    assert got["height_mm"] == 65.96, got
+    assert got["plate_name"] == "Oberteil 'groß` Herz", got
+    # the whole reason the header is read: the multiplication is wrong here
+    assert abs(got["layers"] * got["layer_h"] - got["height_mm"]) > 25, (
+        "this sample no longer demonstrates the variable-layer-height case it "
+        "was captured for")
     print("ok")

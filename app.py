@@ -1709,7 +1709,9 @@ def _slicer_pending(limit: int = 25) -> list[dict]:
     """
     out = []
     for r in store.recent_prints(limit=200):
-        if r.get("slice_json") or not r.get("ended_at"):
+        if not r.get("ended_at"):
+            continue
+        if _slice_stamp(r) >= gcode_meta.FORMAT:
             continue
         if _slicer_tries.get(r.get("job_id"), 0) >= SLICER_MAX_TRIES:
             continue
@@ -1717,6 +1719,23 @@ def _slicer_pending(limit: int = 25) -> list[dict]:
         if len(out) >= limit:
             break
     return out
+
+
+def _slice_stamp(row: dict) -> int:
+    """Which version of the parser wrote this print's block, 0 for none.
+
+    A print read by an older parser is read again rather than left with a block
+    that quietly lacks whatever was added since - the file is still on the drive
+    and re-reading costs one bounded fetch. Blocks written before the stamp
+    existed count as version 1.
+    """
+    raw = row.get("slice_json")
+    if not raw:
+        return 0
+    try:
+        return int(json.loads(raw).get("v") or 1)
+    except (TypeError, ValueError):
+        return 1
 
 
 def slicer_worker():
@@ -1929,6 +1948,74 @@ def _slice_block(row: dict):
         return json.loads(raw)
     except (TypeError, ValueError):
         return None
+
+
+# Listing the drive means opening a connection to the printer, so the answer is
+# held briefly: switching to the view and back should not dial the printer twice.
+_drive_cache = {"at": 0.0, "data": None}
+DRIVE_TTL = 30.0
+
+
+@app.route("/api/storage")
+def api_storage():
+    """What is on the printer's USB drive, and how full it is.
+
+    Two different sources, deliberately kept apart on the page:
+      * how full - from MQTT, which is the only thing that knows the capacity.
+        FTP can list a drive but has no command for its size (this server
+        offers neither AVBL nor SITE), so file sizes could only ever say how
+        much we can see.
+      * what is on it - from FTP, on demand.
+    Either half can be missing without the other going with it.
+    """
+    with _state_lock:
+        storage = dict((_state.get("storage") or {}))
+    out = {"storage": storage, "files": None, "error": None,
+           "listed_bytes": 0, "truncated": False, "at": 0.0}
+
+    if request.args.get("refresh"):
+        _drive_cache["at"] = 0.0
+    fresh = _drive_cache["data"] if (
+        time.time() - _drive_cache["at"] < DRIVE_TTL) else None
+    if fresh is None:
+        try:
+            ftp = gcode_meta.connect(
+                CFG.get("ip"), CFG.get("access_code"),
+                timeout=float(SLICER_CFG.get("timeout_sec", 20) or 20))
+            try:
+                files, truncated = gcode_meta.list_drive(ftp)
+            finally:
+                try:
+                    ftp.close()
+                except Exception:
+                    pass
+            fresh = {"files": files, "truncated": truncated, "error": None,
+                     "at": time.time()}
+        except gcode_meta.SlicerError as e:
+            fresh = {"files": [], "truncated": False, "error": str(e)[:200],
+                     "at": time.time()}
+        _drive_cache.update(at=time.time(), data=fresh)
+
+    files = [dict(f) for f in fresh["files"]]
+    # tie each sliced file back to the print it made, so the list is about the
+    # workshop rather than about a filesystem
+    by_sub = {}
+    for r in store.recent_prints(limit=200):
+        if r.get("name"):
+            by_sub[r["name"] + gcode_meta.SUFFIX] = r
+    for f in files:
+        r = by_sub.get(f["name"])
+        if not r:
+            continue
+        block = _slice_block(r) or {}
+        f["job_id"] = r["job_id"]
+        f["print"] = r.get("label") or block.get("plate_name") or r.get("name")
+        f["printed_at"] = r.get("started_at")
+    out.update(files=files, truncated=fresh["truncated"], error=fresh["error"],
+               at=fresh["at"],
+               listed_bytes=sum(f["size"] for f in files),
+               sliced_bytes=sum(f["size"] for f in files if f["sliced"]))
+    return jsonify(out)
 
 
 @app.route("/api/slicer")

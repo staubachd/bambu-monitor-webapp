@@ -335,6 +335,36 @@ def parse_report(raw: dict) -> dict:
             "resolution": p.get("ipcam", {}).get("resolution"),
             "rtsp_enabled": p.get("ipcam", {}).get("rtsp_url") not in (None, "disable"),
         },
+        # The printer reports how full its storage is, under the timelapse keys
+        # that use it - `tl_external_*` is the USB drive, `tl_internal_*` the
+        # board's own flash. This is the only source for the drive's SIZE: FTP
+        # can list what is on it but has no command for capacity (this server
+        # offers no AVBL and no SITE), so summing file sizes would say how much
+        # we can see, never how much is there.
+        #
+        # `sdcard` is the printer's own word for "a drive is present"; the X2D
+        # has no card slot, only USB. Both external figures read 0 with nothing
+        # plugged in, which is why the flag is carried separately - 0 free and
+        # "no drive" are not the same thing.
+        "storage": _storage(p),
+    }
+
+
+def _storage(p: dict) -> dict:
+    cam = p.get("ipcam") or {}
+    ext_total, ext_free = _num(cam.get("tl_external_total_kb")), _num(cam.get("tl_external_free_kb"))
+    int_total, int_free = _num(cam.get("tl_internal_total_kb")), _num(cam.get("tl_internal_free_kb"))
+
+    def block(total, free):
+        if not total:
+            return None
+        return {"total_kb": total, "free_kb": free,
+                "used_kb": (total - free) if free is not None else None}
+
+    return {
+        "present": bool(p.get("sdcard")),
+        "external": block(ext_total, ext_free),
+        "internal": block(int_total, int_free),
     }
 
 

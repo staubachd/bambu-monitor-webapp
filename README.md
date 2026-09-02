@@ -94,8 +94,8 @@ per print must be accurate)
   layers cell, or the line in the detail panel, and type `0.2`, `0,2 mm` or
   `200 µm`. What you type always wins over what was read, and clearing it falls
   back to the file rather than to nothing. Blank means *not recorded*, never a
-  guessed default. Where a height is known, the detail panel also shows
-  layers × height as the model height.
+  guessed default. The detail panel also shows the model's real height, read
+  from the file rather than multiplied out — see below for why that matters.
 - **Delete a row** (✕ on row hover, behind a confirm) — for test/showcase prints
   started at the printer itself that shouldn't count toward stats or cost; a
   running print is refused, and the deleted row can't be re-created by the next
@@ -897,6 +897,7 @@ printer (and re-enable LAN Mode Live View, which a reboot can revert).
 | `POST /api/prints/layerheight` | Set **your** layer height for a print `{ "job_id": …, "mm": "0.2" }`. Accepts `0,2`, `0.2 mm`, `200 µm` and a bare `200` (read as microns); blank clears it, falling back to the slicer's. Refuses anything outside 0.01–3 mm with **400**, an unknown job with **404**. |
 | `POST /api/prints/slicer` | Read one print's sliced file from the printer now `{ "job_id": … }`. **400** if the reader is switched off, **404** for an unknown print, **502** if the file could not be read. |
 | `GET /api/slicer`          | What the slicer reader has been doing: enabled, last pass, how many prints are still waiting. |
+| `GET /api/storage`         | What is on the printer's USB drive and how full it is. `?refresh=1` forces a new listing instead of the 30 s cache. |
 | `POST /api/prints/delete`  | Delete one print from the history `{ "job_id": … }`. Refuses a currently-running job with **409**; the telemetry time-series is left untouched. |
 | `POST /api/cloud/refresh`  | Trigger an immediate Bambu Cloud enrichment pass.                   |
 | `POST /api/hms/ack`        | Acknowledge / restore an HMS health warning.                        |
@@ -1100,6 +1101,31 @@ backend ever arrives that is neither.
 
 ---
 
+## The printer's USB drive
+
+**Printer → USB drive** lists what is on the stick and how full it is. Two
+figures from two sources, kept apart on purpose:
+
+- **How full** comes from MQTT (`tl_external_total_kb` / `tl_external_free_kb`,
+  with `sdcard` as the is-it-plugged-in flag). That is the *only* source: FTP can
+  list a drive but has no command for its capacity — this server advertises
+  neither `AVBL` nor `SITE` — so adding up file sizes could only ever say how
+  much is visible, never how much is there.
+- **What is on it** comes from FTP, walked on demand and cached for 30 seconds so
+  that switching to the view and back does not dial the printer each time.
+
+On the real drive those two disagree by about 6 GB: the printer reports 6.0 GB of
+28.5 GB used, and the FTP view shows 12.5 MB. The page **says so** rather than
+labelling the difference "other files" — nothing here has measured what that
+space is, and a category invented to make a bar add up is a lie with a progress
+bar on it.
+
+Sliced jobs are tied back to the print they made (the file is
+`<subtask name>.gcode.3mf`), so the list reads as a workshop rather than a
+filesystem. The walk is bounded — three levels deep, 2000 entries — and says when
+it stopped early, because a drive is somebody else's filesystem and can hold
+anything. Nothing here writes to the drive.
+
 ## Slicer metadata
 
 Some facts about a print exist only in the file that was sliced. Layer height is
@@ -1116,20 +1142,30 @@ print.
 **What it reads.** The sliced file is a ZIP named `<subtask name>.gcode.3mf`.
 Only two members matter, and neither of them is the gcode:
 
-| member | uncompressed | in the archive |
+| member | uncompressed | what is read |
 |---|---|---|
-| `Metadata/project_settings.config` | 94 KB | 13.6 KB |
-| `Metadata/slice_info.config` | 1.8 KB | 650 b |
-| `Metadata/plate_15.gcode` | 11.2 MB | 2.9 MB — **never read** |
+| `Metadata/project_settings.config` | 94 KB | all of it (13.6 KB in the archive) |
+| `Metadata/slice_info.config` | 1.8 KB | all of it |
+| `Metadata/model_settings.config` | 10 KB | all of it — the plate names |
+| `Metadata/plate_15.gcode` | 11.2 MB | **the first 4 KB**, for the header block |
 
 A ZIP can be read backwards — the index is at the end, and members can be
 fetched individually — and FTP has `REST`, which starts a transfer at an offset.
 Driving `zipfile` through a seekable FTP-`REST` file therefore reads about
-**80 KB whatever the size of the job**. Measured against a real 3.8 MB file:
-81,146 bytes in five transfers, 1.4 s. On a 150 MB twelve-plate project it would
-still be about 80 KB. This matters more than it looks: downloading whole jobs on
-a timer is how a NAS disk never sleeps, and this app has been bitten by exactly
-that once already.
+**150 KB whatever the size of the job**. Measured against two real files:
+149,429 bytes of 4,365,743 (3.4%) and 156,094 of 3,832,815 (4.1%), in under four
+seconds each. On a 150 MB twelve-plate project it would still be about 150 KB.
+This matters more than it looks: downloading whole jobs on a timer is how a NAS
+disk never sleeps, and this app has been bitten by exactly that once already.
+
+**Why the gcode header is worth a fifth read.** `project_settings` gives the
+profile's *nominal* layer height, and layers × that height is the model's height
+only while every layer really is that height. A height range modifier breaks it:
+one real print here ran 767 layers of a `0.12mm High Quality` profile — 92.04 mm
+by multiplication — and was actually **65.96 mm**, with layer steps from 0.012 to
+0.12. The gcode header's `max_z_height` is measured rather than assumed, so the
+panel shows that and shows nothing at all when the file has not been read. A
+number that is wrong by 40% and looks authoritative is worse than no number.
 
 **When it runs.** Once per finished print, on an event — never on a timer. The
 file survives the job on this printer, so the read happens at *finish* rather
@@ -1156,8 +1192,31 @@ without undoing a correction — the same split as `filament_g` /
 into the manual column and empties the other, so a hand-typed value never ends
 up claiming to have come from the sliced file.
 
+**The plate name** comes from `model_settings.config`, which holds the names you
+gave each plate in the slicer — "Oberteile Herz", "blanko für Lichterkette". It
+is not the object name: one real project has plate 9 called *Oberteile blanko*
+holding an object called *Riffel gerade Lichterkette*. For anyone printing a
+series it is the name they actually think in, and nothing else in the app has
+ever known it.
+
 Everything parsed is also kept as JSON in `prints.slice_json`, so a field worth
-showing later needs no migration to reach the page.
+showing later needs no migration to reach the page. That block carries a `v`
+stamp naming the parser that wrote it, and a print stamped older than the
+current `gcode_meta.FORMAT` is read again. Without that, adding a field reaches
+prints made *after* the upgrade only, and everything already recorded keeps a
+block that silently lacks it — which is what happened when the plate name
+arrived. Re-reading is only possible while the file is still on the drive;
+prints whose file has been deleted keep what they have, and the detail panel's
+**Read it again** button is there for after you put one back.
+
+There is more in the file that is deliberately left alone. The 30-long lists
+(`nozzle_temperature` and 42 others) are the whole **filament library**, not this
+print, so indexing them by slot would quietly report another spool's numbers;
+the 6-long speed lists are ambiguous about what indexes them; and
+`plate_N.json`'s `bbox_objects[].layer_height` says `0.2` for a plate sliced at
+`0.12`. The lists that *are* safe are the 5-long ones — `filament_cost`,
+`filament_density`, `filament_settings_id` — indexed by `slice_info`'s filament
+`id` minus one, verified against two independent jobs.
 
 ## How the tricky bits work
 

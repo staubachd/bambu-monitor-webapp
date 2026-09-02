@@ -150,27 +150,63 @@ const slice = r => vm.runInContext("sliceBlock(" + JSON.stringify(r) + ")", ctx)
   if (!/sl-read/.test(none) || !/data-job="j1"/.test(none)) {
     throw new Error("a print with nothing read offers no way to go and read it");
   }
+  // supports off must read as off, not vanish - absent and none are different
+  if (!/none/.test(slice({ job_id: "j", slice: { grams: 1 } }))) {
+    throw new Error("a print with no supports does not say so");
+  }
   const full = slice({
     job_id: "j1", started_at: 1750000000, ended_at: 1750000000 + 3600 * 3,
     slice: { profile: "0.12mm High Quality @BBL X2D", nozzle_mm: 0.4, walls: 2,
              infill_pct: 15, infill_pattern: "gyroid", supports: "tree(auto)",
-             grams: 49.41, est_min: 162.4, first_layer_h: 0.2 },
+             grams: 49.41, est_min: 162.4, first_layer_h: 0.2,
+             plate_name: "Oberteil 'groß` Herz" },
   });
   for (const need of ["0.12mm High Quality", "0.4 mm", "15% gyroid", "tree(auto)",
-                      "49.4 g", "2h 42m"]) {
+                      "49.4 g", "2h 42m", "Oberteil"]) {
     if (!full.includes(need)) throw new Error(`the panel does not show ${need}: ` + full);
   }
   // 3h actual against a 2h42 estimate: the difference is the interesting part
   if (!/\+18 min/.test(full)) {
     throw new Error("the estimate is shown without how far out it was: " + full);
   }
-  if (/sl-read/.test(full)) throw new Error("it still offers to read what it has");
-  // supports off must read as off, not vanish - absent and none are different
-  if (!/none/.test(slice({ job_id: "j", slice: { grams: 1 } }))) {
-    throw new Error("a print with no supports does not say so");
+  // it offers a re-read either way, but the wording has to differ: "read it
+  // from the printer" on an empty panel, "read it again" on a full one
+  if (!/sl-read/.test(full)) throw new Error("no way to refresh a stale block");
+  if (!/Read it again/.test(full) || !/Read it from the printer/.test(none)) {
+    throw new Error("the button says the same thing whether or not there is "
+      + "anything to refresh");
   }
 }
-console.log("the slicer panel shows the profile, the settings and the estimate delta");
+console.log("the slicer panel shows the plate name, the settings and the estimate delta");
+
+// --- model height comes from the file, never from multiplication -----------
+// 767 layers of a "0.12mm" profile is 92.04 mm by arithmetic and 65.96 mm in
+// fact, because that plate used a height range modifier. The multiplication
+// shipped once and was wrong by 40%; the only honest source is max_z_height.
+vm.runInContext(grab("function detailRow("), ctx);
+Object.assign(ctx, {
+  money: (v, c) => `${c} ${Number(v || 0).toFixed(2)}`,
+  fmtDur: (a, b) => (a && b ? Math.round((b - a) / 60) + " min" : "—"),
+});
+const det = r => vm.runInContext("detailRow(" + JSON.stringify(r) + ", '€')", ctx);
+{
+  const real = det({ job_id: "j", total_layers: 767, layer_h: 0.12,
+                     started_at: 1, ended_at: 2,
+                     slice: { height_mm: 65.96, layer_h: 0.12 } });
+  if (!/65\.96 mm/.test(real)) throw new Error("the measured height is not shown");
+  if (/92\.0/.test(real)) {
+    throw new Error("the panel still multiplies layers by layer height - that is "
+      + "92.04 mm for a model that is 65.96 mm tall");
+  }
+  // with no file read, there is no honest height, so none is offered
+  const none = det({ job_id: "j", total_layers: 767, layer_h_manual: 0.12,
+                     started_at: 1, ended_at: 2 });
+  if (/Model height/.test(none)) {
+    throw new Error("a model height was shown for a print whose file was never "
+      + "read - it can only have been computed, and that computation is unsound");
+  }
+}
+console.log("model height is read from the file, and absent rather than guessed");
 
 // --- German ------------------------------------------------------------------
 const de = src.slice(src.indexOf("const DE = {"), src.indexOf("\n};", src.indexOf("const DE = {")));
