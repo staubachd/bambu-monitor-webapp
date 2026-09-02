@@ -29,7 +29,12 @@ const ctx = {
   filName: f => f.product || f.type || "?",
 };
 vm.createContext(ctx);
-for (const fn of ["function detailRow("]) vm.runInContext(grab(fn), ctx);
+// detailRow leans on these; grabbed from the page rather than stubbed, so the
+// panel is exercised with the real precedence and the real formatting
+for (const fn of ["function fmtLH(", "function lhOf(", "function fmtMin(",
+                  "function sliceBlock(", "function detailRow("]) {
+  vm.runInContext(grab(fn), ctx);
+}
 const detail = r => vm.runInContext("detailRow(" + JSON.stringify(r) + ", '€')", ctx);
 
 const BASE = {job_id: "j1", name: "bracket.3mf", started_at: 1750000000,

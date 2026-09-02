@@ -148,6 +148,24 @@ SCHEMA = [
     dict(path="cloud.poll_min", default=10, label="Sync every (min)", kind="int", group="Cloud",
          live=True, min=1, max=1440),
 
+    # ---- slicer ------------------------------------------------------------
+    # Reads the sliced file the printer keeps on its USB drive. No account and
+    # no extra credentials: the same LAN access code that MQTT already uses is
+    # the FTPS password. Off by default, because a printer with no drive in it
+    # would otherwise log a failure after every print.
+    dict(path="slicer.enabled", default=False, label="Read slicer data from the printer",
+         kind="bool", group="Slicer", live=True,
+         help="After a print, read its layer height, profile and exact filament "
+              "weight out of the sliced file on the printer's USB drive. Needs a "
+              "drive in the printer; about 80 KB is read per print."),
+    dict(path="slicer.backfill", default=True, label="Also fill in earlier prints",
+         kind="bool", group="Slicer", live=True,
+         help="Files stay on the drive after the job, so prints from before this "
+              "was switched on can still be filled in - as long as their file is "
+              "still there."),
+    dict(path="slicer.timeout_sec", default=20, label="Connection timeout (s)", kind="int",
+         group="Slicer", live=True, min=5, max=120),
+
     # ---- camera ------------------------------------------------------------
     dict(path="camera.enabled", default=False, label="Camera enabled", kind="bool", group="Camera",
          live=False),

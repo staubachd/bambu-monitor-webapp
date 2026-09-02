@@ -1,0 +1,40 @@
+{
+  "_why": "One table, read by both t_layerh.py and t_layerh.js. The page parses a typed layer height so it can refuse a typo without a round trip, and the server parses it again because a browser is not an authority. Two parsers that disagree is a field that accepts something and then rejects it, so they are held to the same answers here rather than in two lists that drift apart.",
+  "accepts": [
+    ["0.2",        0.2],
+    ["0,2",        0.2],
+    [" 0.2 ",      0.2],
+    ["0.2mm",      0.2],
+    ["0.2 mm",     0.2],
+    ["0.2 MM",     0.2],
+    [".2",         0.2],
+    ["200um",      0.2],
+    ["200 um",     0.2],
+    ["200µm",      0.2],
+    ["200 µm",     0.2],
+    ["80 microns", 0.08],
+    ["80 micron",  0.08],
+    ["200",        0.2],
+    ["120",        0.12],
+    ["0.08",       0.08],
+    ["0.28",       0.28],
+    ["1",          1.0],
+    ["3",          3.0],
+    ["0.01",       0.01]
+  ],
+  "rejects": [
+    ["abc",        "not a number at all"],
+    ["mm",         "a unit with no number"],
+    ["0.2 inches", "a unit neither side knows"],
+    ["0",          "zero is not a layer height"],
+    ["-0.2",       "negative"],
+    ["+0.2",       "a sign float() would take and the page would not"],
+    ["1e-1",       "scientific notation, same reason"],
+    ["0.005",      "thinner than any nozzle will lay down"],
+    ["4",          "4 mm, above the ceiling"],
+    ["4mm",        "the same, said explicitly"],
+    ["9",          "in the gap: too thick for mm, and not obviously microns"],
+    ["9000",       "9 mm once read as microns"],
+    ["5000 µm",    "5 mm, spelled in microns"]
+  ]
+}

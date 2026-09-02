@@ -99,7 +99,24 @@ LATE_COLUMNS = {
                "filament_detail": "TEXT", "filament_cost": "FLOAT",
                "ams_bambu": "TEXT", "error_code": "VARCHAR(64)",
                "design_id": "VARCHAR(32)", "profile_id": "VARCHAR(32)",
-               "pgroup": "VARCHAR(120)", "ams_slots": "TEXT"},
+               "pgroup": "VARCHAR(120)", "ams_slots": "TEXT",
+               # layer height in mm, as the slicer recorded it. Neither MQTT
+               # nor the cloud API mentions it; it is read out of the sliced
+               # file on the printer's drive (see gcode_meta.py). NULL means
+               # not known - never a default, because a wrong 0.2 looks
+               # exactly as authoritative as a right one.
+               "layer_h": "FLOAT",
+               # ...and what the user typed, which always wins. The same split
+               # as filament_g / filament_g_manual, for the same reason: the
+               # automatic figure has to be free to be refreshed without
+               # overwriting a correction somebody made by hand.
+               "layer_h_manual": "FLOAT",
+               # the rest of what the slicer knows about this job
+               "nozzle_mm": "FLOAT", "slicer_profile": "VARCHAR(120)",
+               "est_min": "FLOAT",
+               # everything else parsed out of the sliced file, as JSON, so a
+               # field worth showing later needs no migration to reach the page
+               "slice_json": "TEXT"},
     # `code` arrived with invoice import, one release after the table itself.
     # CREATE TABLE IF NOT EXISTS silently does nothing to an existing table, so
     # every column added later has to be listed here or the INSERT breaks.
@@ -127,11 +144,27 @@ LATE_INDEXES = {
     "idx_prints_started": ("prints", "started_at"),
 }
 
+# A column added later sometimes has to inherit the meaning of one that is
+# already there. Keyed "table.column" and run once, at the moment that column is
+# created and therefore guaranteed empty. Not a general migration runner - just
+# the case where a new column takes over a job the old one used to do.
+LATE_BACKFILL = {
+    # layer_h was the hand-typed value, back when typing it was the only way to
+    # know. It belongs to the slicer now, so what was typed moves to _manual and
+    # layer_h is emptied - otherwise a hand-typed figure would sit in the
+    # slicer's column claiming to have come from the sliced file.
+    "prints.layer_h_manual": (
+        "UPDATE prints SET layer_h_manual = layer_h, layer_h = NULL "
+        "WHERE layer_h IS NOT NULL"),
+}
+
 PRINT_COLS = ["job_id", "name", "started_at", "ended_at", "final_state",
               "total_layers", "energy_wh", "cost", "peak_w", "label",
               "design_title", "filament_g", "filament_g_manual",
               "filament_detail", "filament_cost", "ams_bambu", "error_code",
-              "design_id", "profile_id", "pgroup", "ams_slots"]
+              "design_id", "profile_id", "pgroup", "ams_slots", "layer_h",
+              "layer_h_manual", "nozzle_mm", "slicer_profile", "est_min",
+              "slice_json"]
 
 # Never touched by upsert_print's UPDATE branch (which runs from the MQTT loop):
 #   started_at        - so a restart mid-print can't rewrite when the job began
@@ -140,6 +173,8 @@ PRINT_COLS = ["job_id", "name", "started_at", "ended_at", "final_state",
 #   design_title / filament_* - owned by the cloud updater; the MQTT path knows
 #                       nothing about them and would otherwise null them out
 #   pgroup            - user-assigned group, same reasoning as label
+#   layer_h etc.      - read off the sliced file by the slicer worker, or typed
+#                       in by hand; the MQTT loop has never heard of any of it
 #   ams_slots         - what the AMS held while the print ran, written once
 #   design_id/profile_id - the MakerWorld link. The printer reports it as machine
 #                       state and stops reporting it for a self-sliced job, so a
@@ -149,7 +184,9 @@ PRINT_COLS = ["job_id", "name", "started_at", "ended_at", "final_state",
 PRINT_IMMUTABLE = {"job_id", "started_at", "label", "design_title",
                    "filament_g", "filament_g_manual", "filament_detail",
                    "filament_cost", "ams_bambu", "error_code", "pgroup",
-                   "ams_slots", "design_id", "profile_id"}
+                   "ams_slots", "design_id", "profile_id", "layer_h",
+                   "layer_h_manual", "nozzle_mm", "slicer_profile", "est_min",
+                   "slice_json"}
 
 # Identity of every filament ever seen in the AMS, so the Filament page can name
 # a spool long after it has been used up and removed. Usage figures are NOT here:
@@ -357,6 +394,11 @@ class Storage:
                 if col not in existing:
                     cur.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
                     print(f"[store] migrated: added {table}.{col}")
+                    fill = LATE_BACKFILL.get(f"{table}.{col}")
+                    if fill:
+                        cur.execute(fill)
+                        print(f"[store] migrated: filled {table}.{col} from "
+                              f"what was already recorded ({cur.rowcount} row(s))")
         if self.backend == "sqlite":
             cur.execute("CREATE INDEX IF NOT EXISTS idx_telemetry_ts ON telemetry(ts)")
 

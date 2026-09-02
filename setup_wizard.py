@@ -37,7 +37,8 @@ PAGE = os.path.join(HERE, "setup.html")
 STEPS = [
     dict(key="db", title="Database", schema=False),
     dict(key="printer", title="Printer", groups=["Printer"]),
-    dict(key="extras", title="Plug, cloud & camera", groups=["Power", "Cloud", "Camera"]),
+    dict(key="extras", title="Plug, cloud, camera & slicer",
+         groups=["Power", "Cloud", "Camera", "Slicer"]),
     dict(key="costs", title="Costs & filament", groups=["Cost", "Filament"]),
     dict(key="recording", title="Recording & safety", groups=["Recording", "Controls"]),
 ]

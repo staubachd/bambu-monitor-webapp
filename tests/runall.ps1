@@ -48,7 +48,7 @@ foreach ($f in Get-ChildItem "$b\t_*.js" | Sort-Object Name) {
     "{0,-18} {1}" -f $f.Name, $(if ($ok) { "pass" } else { "FAIL" })
     if (-not $ok) { $out | Select-Object -Last 4 | ForEach-Object { "      $_" } }
 }
-foreach ($m in "filament_catalog.py", "bambu_state.py") {
+foreach ($m in "filament_catalog.py", "bambu_state.py", "gcode_meta.py") {
     Push-Location $src
     $out = & py $m 2>&1
     Pop-Location

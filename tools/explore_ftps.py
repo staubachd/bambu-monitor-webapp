@@ -85,13 +85,19 @@ def walk(path="/", depth=0, max_depth=2):
     except Exception as e:
         print(f"{pad}[!] {path}: {e}")
         return
+    # An empty directory and a listing this cannot read look identical if the
+    # loop below simply finds nothing to print - which is how a run that said
+    # nothing at all was mistaken for a broken data connection. Say which it is.
+    shown = 0
     for line in entries:
         parts = line.split(maxsplit=8)
         if len(parts) < 9:
+            print(f"{pad}[?] cannot read this listing line: {line!r}")
             continue
         perms, size, name = parts[0], parts[4], parts[8]
         if name in (".", ".."):
             continue
+        shown += 1
         full = (path.rstrip("/") + "/" + name)
         if perms.startswith("d"):
             print(f"{pad}[dir ] {name}/")
@@ -100,6 +106,14 @@ def walk(path="/", depth=0, max_depth=2):
         else:
             mark = "  <<<" if name.lower().endswith(INTERESTING) else ""
             print(f"{pad}[file] {name:<52} {int(size):>10,} b{mark}")
+    if not shown:
+        # The printer serves the SD card here. With no card in the slot the
+        # login succeeds, the transfer succeeds, and there is simply nothing
+        # in it - which is worth saying out loud rather than printing a blank.
+        print(f"{pad}[--] {path} is empty"
+              + (" - the printer serves the microSD card over FTP, so an empty "
+                 "root usually means there is no card in the slot"
+                 if depth == 0 else ""))
 
 
 if "--raw" in sys.argv:

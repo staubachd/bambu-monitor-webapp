@@ -89,6 +89,13 @@ per print must be accurate)
   cost breakdown)
 - **Editable job names** (the slicer's subtask name is often not descriptive)
 - Click-to-override filament grams when the estimate is off
+- **Layer height and the rest of the slicer's settings**, read off the printer
+  (see [Slicer metadata](#slicer-metadata)). Or typed in by hand: click the
+  layers cell, or the line in the detail panel, and type `0.2`, `0,2 mm` or
+  `200 µm`. What you type always wins over what was read, and clearing it falls
+  back to the file rather than to nothing. Blank means *not recorded*, never a
+  guessed default. Where a height is known, the detail panel also shows
+  layers × height as the model height.
 - **Delete a row** (✕ on row hover, behind a confirm) — for test/showcase prints
   started at the printer itself that shouldn't count toward stats or cost; a
   running print is refused, and the deleted row can't be re-created by the next
@@ -590,6 +597,7 @@ to paste into Settings.
 | `dashboard.html`             | The entire frontend (HTML + CSS + JS + i18n) in one file.               |
 | `bootstrap.py`                | The database connection — the only thing that cannot live in the database. Reads/writes `instance/db.json`, and tests a connection before anything is written to it. |
 | `config_store.py`             | Every other setting, read through from the database with live section views. |
+| `gcode_meta.py`               | Reads the slicer's own metadata off the printer's USB drive over FTPS, without downloading the job: a ZIP read backwards through FTP `REST`, about 80 KB per print. Has a self-test (`python gcode_meta.py`). |
 | `settings_schema.py`          | The one table describing every editable setting: type, range, default, group, and whether it needs a restart. |
 | `setup_wizard.py` / `setup.html` | First-run setup. Served instead of the dashboard when there is no connection on file. |
 | `instance/db.json`            | Written by the wizard: host, port, user, password, database. Seven keys, chmod 600, never edited by hand. Not committed. |
@@ -604,10 +612,10 @@ to paste into Settings.
 | `tools/sniff_power_mqtt.py`   | Read-only: listens to an MQTT broker and prints the topics and fields it hears, marking the ones that look like a power meter. For filling in Settings → Power when the meter is `mqtt`. |
 | `tools/test_mqtt_local.py`    | Standalone check that local MQTT works against the printer.             |
 | `tools/capture_sample.py`     | Captures a real report to `samples/sample_report.json` for offline parser testing. |
-| `tools/explore_ftps.py`       | Explores the printer's FTPS file store (models/thumbnails).            |
+| `tools/explore_ftps.py`       | Explores the printer's FTPS file store. Says explicitly when a directory is empty — the printer serves the USB drive there, and an empty root usually means no drive is in the slot. |
 | `tools/dump_cloud_tasks.py`   | Read-only: cloud tasks next to the stored prints. Diagnoses why an orphaned print didn't close. |
 | `tools/dump_filaments.py`     | Read-only: every filament identity, where it came from, and which look like the same spool split in two. |
-| `samples/`                    | Captured payloads used by `bambu_state.py`'s self-test (not committed).  |
+| `samples/`                    | Captured payloads used by the offline self-tests: MQTT reports for `bambu_state.py`, and a real `project_settings.config` / `slice_info.config` pair so the slicer parser is tested against the exact bytes Bambu Studio writes. |
 | **`tests/`**                  | The test suite: 42 files plus the two module self-tests. Run it with `tests/runall.ps1`, which copies the app into a scratch folder and runs every `t_*.py` / `t_*.js` against a throwaway copy of the database, reporting pass/fail per file - silence is not a pass. Not needed on the NAS. |
 
 | **`deploy/`**                 |                                                                         |
@@ -886,6 +894,9 @@ printer (and re-enable LAN Mode Live View, which a reboot can revert).
 | `POST /api/prints/error`   | Set or clear a print's failure code `{ "job_id": …, "code": "" }`. |
 | `POST /api/prints/finish`  | Close a print that never got an end time `{ "job_id": …, "minutes": … }` — for when the app itself was down mid-job. Refuses a genuinely running print. |
 | `POST /api/prints/filament`| Override the filament grams for a print.                            |
+| `POST /api/prints/layerheight` | Set **your** layer height for a print `{ "job_id": …, "mm": "0.2" }`. Accepts `0,2`, `0.2 mm`, `200 µm` and a bare `200` (read as microns); blank clears it, falling back to the slicer's. Refuses anything outside 0.01–3 mm with **400**, an unknown job with **404**. |
+| `POST /api/prints/slicer` | Read one print's sliced file from the printer now `{ "job_id": … }`. **400** if the reader is switched off, **404** for an unknown print, **502** if the file could not be read. |
+| `GET /api/slicer`          | What the slicer reader has been doing: enabled, last pass, how many prints are still waiting. |
 | `POST /api/prints/delete`  | Delete one print from the history `{ "job_id": … }`. Refuses a currently-running job with **409**; the telemetry time-series is left untouched. |
 | `POST /api/cloud/refresh`  | Trigger an immediate Bambu Cloud enrichment pass.                   |
 | `POST /api/hms/ack`        | Acknowledge / restore an HMS health warning.                        |
@@ -1028,21 +1039,21 @@ one test, and only the third has anything to do with SQL:
 | **dialect** — the only genuinely database-specific SQL | **5** | yes, and that is the whole list |
 
 The five live in one table, `DIALECTS` at
-[storage.py:211](storage.py#L211) — one row per backend, and adding a backend is
+[storage.py:248](storage.py#L248) — one row per backend, and adding a backend is
 filling one in:
 
 | key | sqlite | MariaDB / MySQL | used at |
 |--|--|--|--|
-| `auto` | `AUTOINCREMENT` | `AUTO_INCREMENT` | [storage.py:239](storage.py#L239) |
-| `blob` | `BLOB` | `LONGBLOB` | [storage.py:240](storage.py#L240) |
-| `inline_index` | separate `CREATE INDEX` after | inline in `CREATE TABLE` | [storage.py:287](storage.py#L287) |
-| `columns` | `PRAGMA table_info` | `information_schema.COLUMNS` | [storage.py:378](storage.py#L378) |
-| `upsert` | `REPLACE INTO` | `REPLACE INTO` | [storage.py:867](storage.py#L867), [storage.py:878](storage.py#L878) |
+| `auto` | `AUTOINCREMENT` | `AUTO_INCREMENT` | [storage.py:276](storage.py#L276) |
+| `blob` | `BLOB` | `LONGBLOB` | [storage.py:277](storage.py#L277) |
+| `inline_index` | separate `CREATE INDEX` after | inline in `CREATE TABLE` | [storage.py:324](storage.py#L324) |
+| `columns` | `PRAGMA table_info` | `information_schema.COLUMNS` | [storage.py:420](storage.py#L420) |
+| `upsert` | `REPLACE INTO` | `REPLACE INTO` | [storage.py:909](storage.py#L909), [storage.py:920](storage.py#L920) |
 
 A sixth key, `server`, is not about SQL: it says whether the backend is reached
 over TCP with a connection per call (and so needs no explicit commit), which is
 the lifecycle question, and it is what the connect branch at
-[storage.py:241](storage.py#L241) tests.
+[storage.py:278](storage.py#L278) tests.
 
 Two things make this smaller than it looks. There is **no
 `ON DUPLICATE KEY UPDATE` anywhere** — the `prints` and `filaments` upserts are
@@ -1069,7 +1080,7 @@ So, concretely:
   differs), `BYTEA`, a separate `CREATE INDEX`, `INSERT … ON CONFLICT DO UPDATE`
   for those two statements, and a slightly different information_schema query.
   `rowcount` is a bonus: Postgres counts matched rows natively, so the
-  `CLIENT.FOUND_ROWS` workaround at [storage.py:247](storage.py#L247) is not
+  `CLIENT.FOUND_ROWS` workaround at [storage.py:294](storage.py#L294) is not
   needed. The work that is **not** visible in a grep is type strictness —
   sqlite and MySQL accept `None` or `""` into a `FLOAT`, Postgres does not — and
   finding those needs the test suite run against a live server, not reasoning
@@ -1088,6 +1099,65 @@ server backend. They are churn, not correctness, and are only worth doing if a
 backend ever arrives that is neither.
 
 ---
+
+## Slicer metadata
+
+Some facts about a print exist only in the file that was sliced. Layer height is
+the obvious one — it is in no MQTT frame and in no cloud response. So are the
+profile name, the infill, the supports, and the exact gram figure the slicer
+computed.
+
+The printer keeps that file on a **USB drive** and serves it over the same FTPS
+port MQTT's access code already unlocks, so this needs no account and no extra
+credentials. Switch it on under **Settings → Slicer**; it is off by default,
+because a printer with no drive in it would otherwise log a failure after every
+print.
+
+**What it reads.** The sliced file is a ZIP named `<subtask name>.gcode.3mf`.
+Only two members matter, and neither of them is the gcode:
+
+| member | uncompressed | in the archive |
+|---|---|---|
+| `Metadata/project_settings.config` | 94 KB | 13.6 KB |
+| `Metadata/slice_info.config` | 1.8 KB | 650 b |
+| `Metadata/plate_15.gcode` | 11.2 MB | 2.9 MB — **never read** |
+
+A ZIP can be read backwards — the index is at the end, and members can be
+fetched individually — and FTP has `REST`, which starts a transfer at an offset.
+Driving `zipfile` through a seekable FTP-`REST` file therefore reads about
+**80 KB whatever the size of the job**. Measured against a real 3.8 MB file:
+81,146 bytes in five transfers, 1.4 s. On a 150 MB twelve-plate project it would
+still be about 80 KB. This matters more than it looks: downloading whole jobs on
+a timer is how a NAS disk never sleeps, and this app has been bitten by exactly
+that once already.
+
+**When it runs.** Once per finished print, on an event — never on a timer. The
+file survives the job on this printer, so the read happens at *finish* rather
+than at start, when the printer has better things to do. A print whose file
+cannot be read is retried twice and then left alone; the detail panel has a
+**Read it from the printer** button for trying again after putting the drive
+back in. Turning the setting on backfills prints whose files are still there.
+
+**What it will not do.** It refuses rather than guesses, in three places:
+
+- the file is chosen by **name**, matched against the print. Not "the newest
+  one" — that would put one print's layer height on another's row
+- the plate number the file declares is cross-checked against the one MQTT
+  reported, and a disagreement reads nothing
+- the slicer's weight **fills a gap and never overwrites** a figure already
+  there. Where both exist they have been identical (49.41 g from the cloud,
+  `weight="49.41"` in the file), so there is nothing to gain by competing — but
+  it does mean an install with no Bambu account now gets exact filament weights.
+
+**What you typed always wins.** The parsed height lives in `layer_h` and yours
+in `layer_h_manual`, so re-reading the file can refresh the automatic figure
+without undoing a correction — the same split as `filament_g` /
+`filament_g_manual`. Upgrading moves any height you typed before this existed
+into the manual column and empties the other, so a hand-typed value never ends
+up claiming to have come from the sliced file.
+
+Everything parsed is also kept as JSON in `prints.slice_json`, so a field worth
+showing later needs no migration to reach the page.
 
 ## How the tricky bits work
 

@@ -39,6 +39,7 @@ from flask import Flask, Response, jsonify, request, send_file
 import backup
 import bootstrap
 import filament_catalog
+import gcode_meta
 import power_providers
 import config_store
 import settings_schema
@@ -340,8 +341,14 @@ def _maybe_persist_print(state: dict) -> None:
         _last_print_write.update(ts=now, state=st)
         # a print just ended -> fetch its filament data now instead of waiting
         # out the poll interval
-        if changed and st in ("FINISH", "FAILED") and CLOUD_CFG.get("enabled"):
-            _cloud_kick.set()
+        if changed and st in ("FINISH", "FAILED"):
+            if CLOUD_CFG.get("enabled"):
+                _cloud_kick.set()
+            # the sliced file is still on the drive after the job - proven on
+            # this printer - so this reads it at finish rather than at start,
+            # when the printer has better things to do
+            if SLICER_CFG.get("enabled"):
+                _slicer_kick.set()
 
 
 def _persist_print(state: dict) -> None:
@@ -1614,6 +1621,151 @@ def _apply_cloud_task(task: dict) -> bool:
     return True
 
 
+# --------------------------------------------------------------------------
+# slicer metadata: what only the sliced file knows
+# --------------------------------------------------------------------------
+SLICER_CFG = CONFIG.section("slicer")
+_slicer_kick = threading.Event()   # a print ended -> go and read its file
+_slicer_last = {"at": 0.0, "ok": 0, "failed": 0, "error": None, "read_bytes": 0}
+
+
+def _slicer_plate(gcode_file: str | None):
+    """The plate number out of MQTT's `/data/Metadata/plate_15.gcode`.
+
+    Only used to cross-check the file we picked. It is machine state, so it
+    survives the job that set it - which is exactly why it is a check on a file
+    chosen by name, and never the thing that chooses one.
+    """
+    m = re.search(r"plate_(\d+)", str(gcode_file or ""))
+    return int(m.group(1)) if m else None
+
+
+def _live_plate(job_id: str):
+    """The plate number for a print, but only from live machine state and only
+    while that state is still about this job.
+
+    MQTT keeps reporting `gcode_file` after a job ends - machine state, not job
+    state, the same trap as `print_error` and `design_id`. So it is used as a
+    cross-check on the file we already picked by name, for the one print it can
+    honestly speak for, and never for an older one.
+    """
+    job = (_state.get("job") or {})
+    if job.get("task_id") and str(job["task_id"]) == str(job_id):
+        return _slicer_plate(job.get("file"))
+    return None
+
+
+def _slicer_apply(row: dict) -> bool:
+    """Read one print's sliced file and store what it says. False if it could
+    not be read, which is an ordinary outcome and never raises."""
+    job_id = row.get("job_id")
+    subtask = row.get("name")
+    if not (job_id and subtask):
+        return False
+    try:
+        meta = gcode_meta.fetch(
+            CFG.get("ip"), CFG.get("access_code"), subtask=subtask,
+            plate=_live_plate(job_id),
+            timeout=float(SLICER_CFG.get("timeout_sec", 20) or 20))
+    except gcode_meta.SlicerError as e:
+        _slicer_last["error"] = str(e)[:200]
+        _slicer_tries[job_id] = _slicer_tries.get(job_id, 0) + 1
+        return False
+
+    fields = {
+        "layer_h": meta.get("layer_h"),
+        "nozzle_mm": meta.get("nozzle_mm"),
+        "slicer_profile": (meta.get("profile") or "")[:120] or None,
+        "est_min": meta.get("est_min"),
+        "slice_json": json.dumps(meta, ensure_ascii=False),
+    }
+    # The slicer's weight and the cloud's have been identical wherever both
+    # exist, so this fills the gap rather than competing: an install with no
+    # Bambu account gets the figure, one with an account keeps what it has.
+    if row.get("filament_g") is None and meta.get("grams"):
+        fields["filament_g"] = meta["grams"]
+    store.update_print_fields(job_id, **{k: v for k, v in fields.items()
+                                         if v is not None})
+    _slicer_last["read_bytes"] += int(meta.get("read_bytes") or 0)
+    _slicer_last["error"] = None
+    _slicer_tries.pop(job_id, None)
+    return True
+
+
+# job_id -> failed attempts. A file that is not on the drive is not going to
+# appear later on its own, and retrying every print's file after every print is
+# how a background job turns into a poll. Two goes, then leave it alone until
+# the app restarts or somebody asks for that print by hand.
+_slicer_tries: dict = {}
+SLICER_MAX_TRIES = 2
+
+
+def _slicer_pending(limit: int = 25) -> list[dict]:
+    """Prints that have no slicer data yet, newest first.
+
+    A running print is skipped: its file is on the drive already, but the row is
+    still being rewritten by the MQTT loop every minute, and there is nothing to
+    gain by racing it.
+    """
+    out = []
+    for r in store.recent_prints(limit=200):
+        if r.get("slice_json") or not r.get("ended_at"):
+            continue
+        if _slicer_tries.get(r.get("job_id"), 0) >= SLICER_MAX_TRIES:
+            continue
+        out.append(r)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def slicer_worker():
+    """Read the sliced file of each finished print, once.
+
+    Not a poll. It waits for a print to end and then does one pass; the only
+    repetition is a retry of prints it has not managed to read yet, and that
+    stops as soon as they are read or the file is gone. A printer with no drive
+    in it therefore says so once per print, not once per minute.
+    """
+    if SLICER_CFG.get("backfill", True):
+        _slicer_kick.set()          # catch up on history at startup, once
+    while True:
+        _slicer_kick.wait()
+        _slicer_kick.clear()
+        # a finished print's file is on the drive already, but give the printer
+        # a moment to settle before opening a connection to it
+        time.sleep(5)
+        if not SLICER_CFG.get("enabled"):
+            continue
+        rows = _slicer_pending()
+        if not rows:
+            continue
+        ok = failed = 0
+        for r in rows:
+            if _slicer_apply(r):
+                ok += 1
+            else:
+                failed += 1
+                # one unreadable file is usually all of them (no drive, wrong
+                # code, printer off) - do not hammer the printer to find out
+                if failed >= 3 and ok == 0:
+                    break
+        _slicer_last.update(at=time.time(), ok=ok, failed=failed)
+        # one pass reads at most a batch. If that batch went well and there is
+        # still a backlog, go round again rather than waiting for the next print
+        # to finish - otherwise switching this on with a long history reads 25
+        # prints and then looks broken.
+        if ok and _slicer_pending(limit=1):
+            _slicer_kick.set()
+        if ok:
+            _cost_dirty()
+            print(f"[slicer] read {ok} print(s) from the printer's drive"
+                  + (f", {failed} could not be read" if failed else ""))
+        elif failed:
+            print(f"[slicer] {failed} print(s) could not be read: "
+                  f"{_slicer_last['error']}")
+
+
 _cloud_client = None
 _cloud_kick = threading.Event()   # set when a print ends -> sync without waiting
 
@@ -1764,10 +1916,38 @@ def api_history():
     return jsonify(store.history(hours=hours))
 
 
+def _slice_block(row: dict):
+    """The stored slicer metadata as a dict, or None.
+
+    Kept as JSON in one column so a newly interesting field needs no migration;
+    unpacked here so the page never has to parse it.
+    """
+    raw = row.get("slice_json")
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+@app.route("/api/slicer")
+def api_slicer_status():
+    """What the slicer reader has been doing - for the Settings page."""
+    return jsonify({
+        "enabled": bool(SLICER_CFG.get("enabled")),
+        "last": dict(_slicer_last),
+        "pending": len(_slicer_pending(limit=200)) if SLICER_CFG.get("enabled") else 0,
+        "gave_up": sum(1 for n in _slicer_tries.values() if n >= SLICER_MAX_TRIES),
+    })
+
+
 @app.route("/api/prints")
 def api_prints():
     rows = store.recent_prints(limit=int(request.args.get("limit", 60)))
     for r in rows:
+        r["slice"] = _slice_block(r)
+        r.pop("slice_json", None)      # the page reads `slice`, not the raw JSON
         # total is derived, never stored, so it can't go stale when either half
         # is recalculated
         r["total_cost"] = round((r.get("cost") or 0) + (r.get("filament_cost") or 0), 4)
@@ -2523,6 +2703,11 @@ def api_settings_save():
     if any(p.startswith("filament.") or p.startswith("cost.") for p in list(clean) + clear):
         _rebuild_order_prices()
         _rebuild_filament_meta()
+    # switching the slicer reader on should do something now, not after the next
+    # print finishes - otherwise the setting looks broken for hours
+    if clean.get("slicer.enabled"):
+        _slicer_tries.clear()
+        _slicer_kick.set()
     touched = sorted(set(list(clean) + clear))
     restart = sorted(p for p in touched if not settings_schema.BY_PATH[p]["live"])
     for p in touched:
@@ -2606,6 +2791,100 @@ def api_print_filament():
         except (TypeError, ValueError):
             pass
     return jsonify({"ok": ok, "job_id": job_id, "grams": grams})
+
+
+# What a layer height can plausibly be, in mm. The floor is below anything an
+# FDM printer will actually do; the ceiling exists to catch the one typo that
+# matters - 200, meaning microns, typed into a field that counts millimetres.
+LAYER_H_MIN, LAYER_H_MAX = 0.01, 3.0
+
+
+def _parse_layer_h(raw):
+    """'0.2', '0,2', '0.2 mm', '200um', '200 µm' -> millimetres.
+
+    Blank returns None, which clears it. Anything unreadable or implausible
+    raises, because a layer height nobody can check is worse than none at all.
+    """
+    s = str(raw if raw is not None else "").strip().lower().replace(",", ".")
+    if not s:
+        return None
+    unit = ""
+    for suffix in ("microns", "micron", "µm", "um", "mm"):
+        if s.endswith(suffix):
+            unit, s = suffix, s[:-len(suffix)].strip()
+            break
+    # deliberately stricter than float(): the page has to be able to say "that
+    # is not a number" before it posts, and it can only do that if the two
+    # agree on what a number is. float() would take '1e-1' and '+0.2'.
+    if not re.fullmatch(r"\d*\.?\d+", s):
+        raise ValueError(f"{raw!r} is not a number")
+    v = float(s)
+    if unit and unit != "mm":
+        v /= 1000.0
+    elif not unit and v >= 10:
+        # nobody prints a 10 mm layer, so a bare 200 is microns and means 0.2
+        v /= 1000.0
+    if not (LAYER_H_MIN <= v <= LAYER_H_MAX):
+        raise ValueError(f"{v:g} mm is not a plausible layer height")
+    return round(v, 4)
+
+
+@app.route("/api/prints/layerheight", methods=["POST"])
+def api_print_layer_height():
+    """The user's layer height for one print, in mm. Blank clears it.
+
+    Written to layer_h_manual, never to layer_h: the slicer owns that one, and
+    the two are kept apart so reading the sliced file again can refresh the
+    automatic figure without quietly overwriting a correction. Clearing this
+    falls back to whatever the slicer said, which is the behaviour people
+    expect from an override.
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    job_id = (data.get("job_id") or "").strip()
+    if not job_id:
+        return jsonify({"ok": False, "error": "missing job_id"}), 400
+    try:
+        mm = _parse_layer_h(data.get("mm"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False,
+                        "error": f"layer height must be between {LAYER_H_MIN} "
+                                 f"and {LAYER_H_MAX} mm"}), 400
+    if not store.get_print(job_id):
+        return jsonify({"ok": False, "error": "no such print"}), 404
+    # not update_print_fields()'s return value: clearing an already-empty
+    # override touches no rows, and that is a success, not a failure
+    store.update_print_fields(job_id, layer_h_manual=mm)
+    row = store.get_print(job_id) or {}
+    return jsonify({"ok": True, "job_id": job_id, "mm": mm,
+                    # what the cell will now show, which is not always what was
+                    # just sent: clearing falls back to the slicer's figure
+                    "effective": mm if mm is not None else row.get("layer_h")})
+
+
+@app.route("/api/prints/slicer", methods=["POST"])
+def api_print_slicer():
+    """Read one print's sliced file from the printer now.
+
+    The worker does this on its own when a print ends. This is the button for
+    the case where it could not - the drive was out, the printer was off - and
+    for trying again after fixing whatever it was.
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    job_id = (data.get("job_id") or "").strip()
+    row = store.get_print(job_id) if job_id else None
+    if not row:
+        return jsonify({"ok": False, "error": "no such print"}), 404
+    if not SLICER_CFG.get("enabled"):
+        return jsonify({"ok": False,
+                        "error": "reading slicer data is switched off"}), 400
+    _slicer_tries.pop(job_id, None)      # an explicit ask resets the give-up count
+    if not _slicer_apply(row):
+        return jsonify({"ok": False,
+                        "error": _slicer_last.get("error") or "could not read it"}), 502
+    _cost_dirty()
+    fresh = store.get_print(job_id) or {}
+    return jsonify({"ok": True, "job_id": job_id,
+                    "slice": _slice_block(fresh)})
 
 
 @app.route("/api/prints/label", methods=["POST"])
@@ -3196,6 +3475,9 @@ if __name__ == "__main__":
         threading.Thread(target=power_worker, daemon=True).start()
     if CLOUD_CFG.get("enabled"):
         threading.Thread(target=cloud_worker, daemon=True).start()
+    # always started: the setting is read live, so switching it on in Settings
+    # takes effect without a restart. It sits on an Event and costs nothing.
+    threading.Thread(target=slicer_worker, daemon=True).start()
     if CAM_CFG.get("enabled"):
         threading.Thread(target=go2rtc_worker, daemon=True).start()
     print(f"[web] http://localhost:{PORT}  (printer {CFG.get('ip') or 'not set'}, "

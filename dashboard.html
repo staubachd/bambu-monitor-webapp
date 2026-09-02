@@ -628,6 +628,16 @@
   .htab .nm .nm-txt:hover{text-decoration:underline dotted var(--text-3); text-underline-offset:3px}
   .htab .fil{cursor:text}
   .htab .fil:hover{text-decoration:underline dotted var(--text-3); text-underline-offset:3px}
+  /* layer height sits under the layer count rather than in a column of its own:
+     it is set on a minority of prints, and an empty 14th column would cost
+     every row width to say nothing. */
+  .htab .lh-cell{cursor:text}
+  .htab .lh-cell:hover{text-decoration:underline dotted var(--text-3); text-underline-offset:3px}
+  .lh-sub{font-size:10.5px; color:var(--text-3); margin-top:2px; white-space:nowrap}
+  .det .lh-cell{cursor:text; border-bottom:1px dotted var(--text-3)}
+  /* actual against the slicer's estimate: over is not a failure, so this is
+     quiet rather than coloured like an error */
+  .det .sl-vs{color:var(--text-3); font-family:inherit}
   /* a print that never got an end time: the runaway duration is the symptom */
   .htab .dur{cursor:text; color:var(--warn)}
   .htab .dur:hover{text-decoration:underline dotted var(--warn); text-underline-offset:3px}
@@ -1549,6 +1559,36 @@ function toast(msg, bad){
    stage names, speed levels, AMS activity) are known English strings and get
    translated on display - no backend changes needed. */
 const DE = {
+  // slicer metadata, read off the sliced file on the printer's drive
+  "Slicer":"Slicer",
+  "Read slicer data from the printer":"Slicer-Daten vom Drucker lesen",
+  "After a print, read its layer height, profile and exact filament weight out of the sliced file on the printer's USB drive. Needs a drive in the printer; about 80 KB is read per print.":"Liest nach einem Druck Schichthöhe, Profil und das genaue Filamentgewicht aus der geslicten Datei auf dem USB-Stick des Druckers. Dafür muss ein Stick im Drucker stecken; pro Druck werden rund 80 KB gelesen.",
+  "Also fill in earlier prints":"Auch frühere Drucke nachtragen",
+  "Files stay on the drive after the job, so prints from before this was switched on can still be filled in - as long as their file is still there.":"Die Dateien bleiben nach dem Druck auf dem Stick, deshalb lassen sich auch ältere Drucke noch nachtragen – solange ihre Datei noch da ist.",
+  "Connection timeout (s)":"Zeitlimit der Verbindung (s)",
+  "nothing read from the sliced file":"nichts aus der geslicten Datei gelesen",
+  "Read it from the printer":"Vom Drucker lesen",
+  "Reading…":"Lese…",
+  "Read from the sliced file":"Aus der geslicten Datei gelesen",
+  "Could not read it.":"Konnte nicht gelesen werden.",
+  "Profile":"Profil", "Nozzle":"Düse", "First layer":"Erste Schicht",
+  "Infill":"Füllung", "Walls":"Wände", "Supports":"Stützen", "none":"keine",
+  "Slicer weight":"Slicer-Gewicht", "Estimated":"Geschätzt",
+  "typed in by hand":"von Hand eingetragen",
+  "from the sliced file":"aus der geslicten Datei",
+  "the sliced file says":"die geslicte Datei sagt",
+  "click to override it":"klicken zum Überschreiben",
+  "Back to the sliced file's":"Zurück auf den Wert der geslicten Datei:",
+  "layer height":"Schichthöhe",
+  "Layer height":"Schichthöhe",
+  "Model height":"Modellhöhe",
+  "click to note the layer height":"klicken, um die Schichthöhe einzutragen",
+  "click to change it":"klicken zum Ändern",
+  "click to edit":"klicken zum Bearbeiten",
+  "not noted":"nicht eingetragen",
+  "Could not read that layer height — try 0.2 mm or 200 µm":"Diese Schichthöhe war nicht lesbar – z. B. 0,2 mm oder 200 µm",
+  "Could not save the layer height.":"Die Schichthöhe konnte nicht gespeichert werden.",
+  "Layer height cleared":"Schichthöhe entfernt",
   "Backup":"Sicherung",
   "Download a backup":"Sicherung herunterladen",
   "Download":"Herunterladen",
@@ -2842,6 +2882,99 @@ function parseDur(s){
   if(m) return Math.round(parseFloat(m[1]));
   return null;
 }
+// "0.2" / "0,2" / "0.2mm" / "200µm" -> millimetres, or null if it cannot be
+// read. This mirrors _parse_layer_h in app.py, which is the authority; the copy
+// here exists only so a typo is caught before it becomes a round trip. The two
+// have to agree, and a test holds them to it.
+function parseLayerH(s){
+  s = (s||"").trim().toLowerCase().replace(",", ".");
+  if(!s) return null;
+  let unit = "";
+  for(const suf of ["microns","micron","µm","um","mm"]){
+    if(s.endsWith(suf)){ unit = suf; s = s.slice(0, -suf.length).trim(); break; }
+  }
+  if(!/^\d*\.?\d+$/.test(s)) return null;
+  let v = parseFloat(s);
+  if(unit && unit !== "mm") v /= 1000;
+  else if(!unit && v >= 10) v /= 1000;   // nobody prints a 10 mm layer: 200 is µm
+  return (v >= 0.01 && v <= 3) ? v : null;
+}
+// 0.2 -> "0.20 mm", 0.08 -> "0.08 mm", 0.055 -> "0.055 mm"
+function fmtLH(v){
+  if(v == null) return "";
+  return (+v).toFixed(3).replace(/0$/, "") + " mm";
+}
+// What to show for a print: what you typed beats what the slicer said, exactly
+// the way a manual gram figure beats the computed one. Kept apart in the
+// database so re-reading the sliced file can refresh the automatic figure
+// without silently undoing a correction.
+function lhOf(r){ return r.layer_h_manual != null ? r.layer_h_manual : r.layer_h; }
+// The cell has to say where the number came from. A hand-typed 0.2 and one read
+// off the sliced file look identical, and only one of them is evidence.
+function lhTitle(r){
+  const m = r.layer_h_manual, a = r.layer_h;
+  if(m != null) return t("layer height") + " " + fmtLH(m) + " — " + t("typed in by hand")
+    + (a != null ? " · " + t("the sliced file says") + " " + fmtLH(a) : "")
+    + " · " + t("click to change it");
+  if(a != null) return t("layer height") + " " + fmtLH(a) + " — " + t("from the sliced file")
+    + " · " + t("click to override it");
+  return t("click to note the layer height");
+}
+// the last height that was typed in, offered as the placeholder next time -
+// most people use two or three profiles and retype the same number
+function lastLayerH(){
+  for(const r of (lastPrints||[])) if(r.layer_h != null) return r.layer_h;
+  return null;
+}
+// Layer height is the one fact about a print that nothing on the network knows:
+// it lives in the sliced file, and neither MQTT nor the cloud ever mentions it.
+// So it is typed in on the prints where it matters and left blank on the rest -
+// blank meaning "not recorded", never a plausible-looking default.
+function startEditLH(cell){
+  if(cell.querySelector("input")) return;
+  histEditing = true;
+  const job = cell.dataset.job, prev = lastLayerH();
+  const auto = cell.dataset.auto ? +cell.dataset.auto : null;
+  const inp = document.createElement("input");
+  inp.className = "nm-input";
+  inp.style.minWidth = "84px"; inp.style.textAlign = "right";
+  inp.value = cell.dataset.lh || "";
+  // the slicer's own figure is the most useful thing to show in an empty box:
+  // it says what clearing this will fall back to
+  inp.placeholder = auto != null ? fmtLH(auto)
+                  : prev != null ? fmtLH(prev) : "0.20 mm";
+  cell.textContent = ""; cell.appendChild(inp);
+  inp.focus(); inp.select();
+  let done = false;
+  const finish = async (save)=>{
+    if(done) return; done = true; histEditing = false;
+    const raw = inp.value.trim();
+    if(save && raw && parseLayerH(raw) == null){
+      toast(t("Could not read that layer height — try 0.2 mm or 200 µm"), true);
+    } else if(save){
+      let d = null;
+      try{
+        d = await (await fetch("/api/prints/layerheight", {method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({job_id: job, mm: raw})})).json();
+      }catch(_){}
+      if(!d || !d.ok) toast(t("Could not save the layer height.")
+                            + (d && d.error ? " (" + t(d.error) + ")" : ""), true);
+      else if(raw) toast(t("Layer height") + " " + fmtLH(d.mm));
+      // clearing an override falls back to the sliced file rather than to
+      // nothing, so say which of the two just happened
+      else if(d.effective != null) toast(t("Back to the sliced file's")
+                                         + " " + fmtLH(d.effective));
+      else toast(t("Layer height cleared"));
+    }
+    loadPrints();
+  };
+  inp.addEventListener("keydown", ev=>{
+    if(ev.key==="Enter"){ ev.preventDefault(); finish(true); }
+    else if(ev.key==="Escape"){ ev.preventDefault(); finish(false); }
+  });
+  inp.addEventListener("blur", ()=>finish(true));
+}
 // A print with no end time was interrupted on THIS side - the printer finished
 // it, the recorder didn't. Only the user knows how long it ran.
 function startEditDur(cell){
@@ -2993,6 +3126,27 @@ $("histTable").addEventListener("click", async e=>{
   if(nm){ startEdit(nm); return; }
   const dur = e.target.closest("td.dur");
   if(dur){ startEditDur(dur); return; }
+  const slr = e.target.closest("button.sl-read");
+  if(slr){
+    slr.disabled = true; slr.textContent = t("Reading…");
+    let d = null;
+    try{
+      d = await (await fetch("/api/prints/slicer", {method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({job_id: slr.dataset.job})})).json();
+    }catch(_){}
+    if(d && d.ok){ toast(t("Read from the sliced file")); loadPrints(); }
+    else{
+      // the reason matters here: "no drive in the printer" and "switched off"
+      // need different things done about them
+      toast(t("Could not read it.") + (d && d.error ? " (" + t(d.error) + ")" : ""), true);
+      slr.disabled = false; slr.textContent = t("Read it from the printer");
+    }
+    return;
+  }
+  // both the layer-count cell and the line in the detail panel carry .lh-cell
+  const lh = e.target.closest(".lh-cell");
+  if(lh){ startEditLH(lh); return; }
   const fil = e.target.closest("td.fil");
   if(fil) startEditFil(fil);
 });
@@ -3174,7 +3328,10 @@ function printRow(r, cur){
               running ? t("running") : t(FINAL_LABEL[r.final_state] || r.final_state || "—")}</span>${
               r.error_code?`<div class="err-sub err-clr" data-job="${esc(r.job_id)}"
                 title="${t("wrong error? click to clear it")}">${esc(r.error_code)}</div>`:""}</td>
-        <td class="num">${r.total_layers ?? "—"}</td>
+        <td class="num lh-cell" data-job="${esc(r.job_id)}" data-lh="${r.layer_h_manual ?? ""}"
+            data-auto="${r.layer_h ?? ""}" title="${lhTitle(r)}">${r.total_layers ?? "—"}${
+              lhOf(r) != null ? `<div class="lh-sub">${fmtLH(lhOf(r))}${
+                r.layer_h_manual != null ? " *" : ""}</div>` : ""}</td>
         <td class="num${running ? " dur" : ""}" ${running
             ? `data-job="${esc(r.job_id)}" title="${t("never finished — click to set how long it took")}"` : ""}>${
           fmtDur(r.started_at, r.ended_at)}</td>
@@ -3193,6 +3350,46 @@ function printRow(r, cur){
             aria-label="${t("show everything about this print")}">▶</button></td>
       </tr>` + (histDet.has(r.job_id) ? detailRow(r, cur) : "");
     }).join("");
+}
+
+/* What the slicer knew, read off the sliced file the printer keeps on its USB
+   drive. Absent for prints made before this was switched on, and for any whose
+   file has since been deleted - so the panel offers to go and look rather than
+   pretending the facts do not exist. */
+function sliceBlock(r){
+  const s = r.slice;
+  if(!s){
+    return `<div>
+      <h4>${t("Slicer")}</h4>
+      <div class="none">${t("nothing read from the sliced file")}</div>
+      <button class="wbtn sl-read" type="button" data-job="${esc(r.job_id)}"
+        style="margin-top:8px">${t("Read it from the printer")}</button>
+    </div>`;
+  }
+  const line = (k, v) => `<span class="k">${t(k)}</span><span class="v">${v}</span>`;
+  const est = s.est_min;
+  const ran = (r.ended_at != null && r.started_at != null)
+    ? (r.ended_at - r.started_at) / 60 : null;
+  return `<div>
+    <h4>${t("Slicer")}</h4>
+    <div class="dl">
+      ${s.profile ? line("Profile", esc(s.profile)) : ""}
+      ${s.nozzle_mm != null ? line("Nozzle", s.nozzle_mm + " mm") : ""}
+      ${s.first_layer_h != null ? line("First layer", fmtLH(s.first_layer_h)) : ""}
+      ${s.infill_pct != null ? line("Infill", s.infill_pct + "%"
+          + (s.infill_pattern ? " " + esc(s.infill_pattern) : "")) : ""}
+      ${s.walls != null ? line("Walls", s.walls) : ""}
+      ${line("Supports", s.supports ? esc(s.supports) : t("none"))}
+      ${s.grams != null ? line("Slicer weight", s.grams.toFixed(1) + " g") : ""}
+      ${est != null ? line("Estimated", fmtMin(est)
+          + (ran ? ` <span class="sl-vs">(${ran > est ? "+" : ""}${
+              Math.round(ran - est)} min)</span>` : "")) : ""}
+    </div>
+  </div>`;
+}
+function fmtMin(m){
+  const h = Math.floor(m / 60), r = Math.round(m % 60);
+  return (h ? h + "h " : "") + r + "m";
 }
 
 /* Everything known about one print, in one place. These facts exist today but
@@ -3216,6 +3413,13 @@ function detailRow(r, cur){
         ${line("Ended", when(r.ended_at))}
         ${line("Duration", fmtDur(r.started_at, r.ended_at))}
         ${line("Layers", r.total_layers ?? "—")}
+        ${line("Layer height", `<span class="lh-cell" data-job="${esc(r.job_id)}"
+            data-lh="${r.layer_h_manual ?? ""}" data-auto="${r.layer_h ?? ""}"
+            title="${t("click to edit")}">${
+            lhOf(r) != null ? fmtLH(lhOf(r)) + (r.layer_h_manual != null ? " *" : "")
+                            : t("not noted")}</span>`)}
+        ${lhOf(r) != null && r.total_layers
+            ? line("Model height", (lhOf(r) * r.total_layers).toFixed(1) + " mm") : ""}
         ${r.error_code ? line("Error", esc(r.error_code)) : ""}
       </div>
     </div>
@@ -3241,6 +3445,7 @@ function detailRow(r, cur){
         ${line("Total", `<b>${money(r.total_cost, cur)}</b>`)}
       </div>
     </div>
+    ${sliceBlock(r)}
     <div>
       <h4>${t("Filing")}</h4>
       <div class="dl">

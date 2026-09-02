@@ -30,15 +30,15 @@ sec = readme[start:readme.index("## How the tricky bits work", start)]
 # The table's "used at" column points at where each dialect key is READ, so
 # that is what these lines must contain - not the value it resolves to.
 CITED = {
-    211: "DIALECTS = {",
-    239: 'dialect["auto"]',
-    240: 'dialect["blob"]',
-    241: 'dialect["server"]',
-    247: "FOUND_ROWS",
-    287: 'dialect["inline_index"]',
-    378: 'dialect["columns"]',
-    867: "REPLACE INTO settings",
-    878: "REPLACE INTO hms_ack",
+    248: "DIALECTS = {",
+    276: 'dialect["auto"]',
+    277: 'dialect["blob"]',
+    278: 'dialect["server"]',
+    294: "FOUND_ROWS",
+    324: 'dialect["inline_index"]',
+    420: 'dialect["columns"]',
+    909: "REPLACE INTO settings",
+    920: "REPLACE INTO hms_ack",
 }
 # A link's visible label names a line too, and the two rot independently: a
 # bulk update of the hrefs left "[storage.py:717](storage.py#L812)" behind,
@@ -82,8 +82,11 @@ assert "ON CONFLICT" not in store.upper(), \
 print("no dialect-locked upsert beyond the two REPLACE INTO the README names")
 
 # --- the six column types ---------------------------------------------------
+# Comments are stripped first: a type named in prose is not a column type, and
+# this used to fail on the word JSON appearing in a comment about a TEXT column.
+code = "\n".join(l.split("#")[0] for l in lines)
 types = set(re.findall(r"\b(FLOAT|DOUBLE|TEXT|INTEGER|LONGBLOB|BLOB|BOOLEAN|"
-                       r"TINYINT|DATETIME|TIMESTAMP|DECIMAL|JSON)\b", store))
+                       r"TINYINT|DATETIME|TIMESTAMP|DECIMAL|JSON)\b", code))
 types -= {"BLOB"}          # the sqlite half of the _blob pair
 unexpected = types - {"FLOAT", "DOUBLE", "TEXT", "INTEGER", "LONGBLOB"}
 assert not unexpected, (f"the schema gained column types the README does not list: "
