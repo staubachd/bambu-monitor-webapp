@@ -248,6 +248,59 @@ def _mtime(ftp, name: str) -> float | None:
         return None
 
 
+class Conn:
+    """One FTPS session, which may have to be replaced mid-read.
+
+    A ranged read aborts transfers, and a control connection that cannot be
+    resynchronised afterwards has to be thrown away and redialled. Whoever
+    opened it therefore has to be able to close whatever it BECAME, not the
+    object it started as.
+
+    This class exists because the first version did not, and closed the
+    original: every replacement leaked a session to the printer. The printer's
+    FTP server has a small pool of them, so a backfill across a hundred prints
+    exhausted it and every handshake after that timed out - for every client on
+    the network, not just this app. A leaked socket to an embedded server is not
+    a tidiness problem.
+    """
+
+    def __init__(self, dial=None, ftp=None):
+        if dial is None and ftp is None:
+            raise ValueError("a Conn needs either a dialler or a connection")
+        self._dial = dial
+        self.ftp = ftp if ftp is not None else dial()
+        self.opened = 1
+
+    def replace(self):
+        self.close()
+        if self._dial is None:
+            raise SlicerError("lost the control connection mid-read")
+        self.ftp = self._dial()
+        self.opened += 1
+        return self.ftp
+
+    def close(self):
+        if self.ftp is None:
+            return
+        try:
+            self.ftp.close()
+        except Exception:
+            pass
+        self.ftp = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        self.close()
+
+
+def _as_conn(what) -> Conn:
+    """Accept a Conn or a bare connection. A bare one cannot be replaced, which
+    is right for callers that do not do ranged reads."""
+    return what if isinstance(what, Conn) else Conn(ftp=what)
+
+
 class RemoteZip(io.RawIOBase):
     """A seekable view of a file on the printer, backed by FTP REST.
 
@@ -260,9 +313,9 @@ class RemoteZip(io.RawIOBase):
 
     WINDOW = 64 * 1024
 
-    def __init__(self, ftp, name: str, size: int, reconnect=None):
-        self.ftp, self.name, self.size = ftp, name, size
-        self._reconnect = reconnect
+    def __init__(self, conn, name: str, size: int):
+        self.conn = _as_conn(conn)
+        self.name, self.size = name, size
         self.pos = 0
         self.buf, self.buf_at = b"", -1
         self.pulled = 0
@@ -288,30 +341,27 @@ class RemoteZip(io.RawIOBase):
                 f"reading this file wanted more than {MAX_PULL // 1024} KB - "
                 f"refusing, because the point of this is to read a little")
         got = bytearray()
+        ftp = self.conn.ftp
         # REST is refused in ASCII mode; retrbinary sets this, transfercmd does not
-        self.ftp.voidcmd("TYPE I")
-        conn = self.ftp.transfercmd(f"RETR {self.name}", rest=start)
+        ftp.voidcmd("TYPE I")
+        data = ftp.transfercmd(f"RETR {self.name}", rest=start)
         self.transfers += 1
         try:
             while len(got) < want:
-                chunk = conn.recv(min(32768, want - len(got)))
+                chunk = data.recv(min(32768, want - len(got)))
                 if not chunk:
                     break
                 got.extend(chunk)
         finally:
-            conn.close()
-            # the server is still sending: resynchronise, or reconnect if the
-            # control connection cannot be brought back into step
+            data.close()
+            # the server is still sending: resynchronise, or replace the session
+            # if the control connection cannot be brought back into step.
+            # Conn.replace() closes the old one - leaking it here is what
+            # exhausted the printer's session pool once already.
             try:
-                self.ftp.voidresp()
+                ftp.voidresp()
             except Exception:
-                if self._reconnect is None:
-                    raise SlicerError("lost the control connection mid-read") from None
-                try:
-                    self.ftp.close()
-                except Exception:
-                    pass
-                self.ftp = self._reconnect()
+                self.conn.replace()
         self.pulled += len(got)
         return bytes(got)
 
@@ -352,9 +402,9 @@ def _gcode_member(names: set, slice_raw: bytes | None) -> str | None:
     return only[0] if len(only) == 1 else None
 
 
-def read_members(ftp, name: str, size: int, reconnect=None) -> tuple[dict, int]:
+def read_members(conn, name: str, size: int) -> tuple[dict, int]:
     """The members of one sliced file worth reading, plus the bytes it cost."""
-    rz = RemoteZip(ftp, name, size, reconnect=reconnect)
+    rz = RemoteZip(conn, name, size)
     try:
         z = zipfile.ZipFile(rz)
         names = set(z.namelist())
@@ -581,27 +631,29 @@ def pick_file(files: list[dict], subtask: str | None) -> dict | None:
 
 
 def fetch(ip: str, access_code: str, subtask: str | None = None,
-          plate: int | None = None, timeout: float = 20.0) -> dict:
+          plate: int | None = None, timeout: float = 20.0,
+          conn: "Conn | None" = None) -> dict:
     """Everything the slicer knows about one print. Raises SlicerError.
+
+    Pass `conn` to read several prints over one session. Without it, one is
+    opened and closed here.
 
     `plate`, when the caller knows it from MQTT's gcode_file, is checked against
     the plate the file says it holds. They have always agreed on the real
     printer; if they ever do not, that means the file is not this print's, and
     saying nothing is the only safe answer.
     """
-    def _dial():
-        return connect(ip, access_code, timeout)
-
-    ftp = _dial()
+    own = conn is None
+    if own:
+        conn = Conn(dial=lambda: connect(ip, access_code, timeout))
     try:
-        files = sliced_files(ftp)
+        files = sliced_files(conn.ftp)
         chosen = pick_file(files, subtask)
         if chosen is None:
             raise SlicerError(
                 f"no sliced file on the drive for {subtask!r}"
                 if subtask else "no sliced file on the drive")
-        raw, pulled = read_members(ftp, chosen["name"], chosen["size"],
-                                   reconnect=_dial)
+        raw, pulled = read_members(conn, chosen["name"], chosen["size"])
         meta = parse(raw.get(SETTINGS_MEMBER), raw.get(SLICE_MEMBER),
                      raw.get(MODEL_MEMBER), raw.get(HEADER_KEY))
         if plate and meta.get("plate") and int(meta["plate"]) != int(plate):
@@ -613,10 +665,11 @@ def fetch(ip: str, access_code: str, subtask: str | None = None,
         meta["read_bytes"] = pulled
         return meta
     finally:
-        try:
-            ftp.close()
-        except Exception:
-            pass
+        # only close what we opened: a caller reading several prints hands the
+        # same session in for all of them, which is far kinder to a printer with
+        # a small pool of them than one dial per print
+        if own:
+            conn.close()
 
 
 if __name__ == "__main__":       # a self-test against the captured sample

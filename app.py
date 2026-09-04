@@ -1655,9 +1655,14 @@ def _live_plate(job_id: str):
     return None
 
 
-def _slicer_apply(row: dict) -> bool:
+def _slicer_apply(row: dict, conn=None) -> bool:
     """Read one print's sliced file and store what it says. False if it could
-    not be read, which is an ordinary outcome and never raises."""
+    not be read, which is an ordinary outcome and never raises.
+
+    `conn` shares one FTPS session across a batch. The printer keeps a small
+    pool of them and hands out no more; a session per print, a hundred prints
+    deep, is what took its file store down once.
+    """
     job_id = row.get("job_id")
     subtask = row.get("name")
     if not (job_id and subtask):
@@ -1666,7 +1671,8 @@ def _slicer_apply(row: dict) -> bool:
         meta = gcode_meta.fetch(
             CFG.get("ip"), CFG.get("access_code"), subtask=subtask,
             plate=_live_plate(job_id),
-            timeout=float(SLICER_CFG.get("timeout_sec", 20) or 20))
+            timeout=float(SLICER_CFG.get("timeout_sec", 20) or 20),
+            conn=conn)
     except gcode_meta.SlicerError as e:
         _slicer_last["error"] = str(e)[:200]
         _slicer_tries[job_id] = _slicer_tries.get(job_id, 0) + 1
@@ -1698,6 +1704,15 @@ def _slicer_apply(row: dict) -> bool:
 # the app restarts or somebody asks for that print by hand.
 _slicer_tries: dict = {}
 SLICER_MAX_TRIES = 2
+
+# How gently to work through a backlog. Switching the reader on with a long
+# history used to mean a hundred FTPS sessions as fast as they could be opened,
+# which the printer's file store did not survive. A small batch, a beat between
+# prints, and a long stand-off when the printer stops answering.
+SLICER_BATCH = 8
+SLICER_GAP = 1.5              # seconds between prints
+SLICER_COOLDOWN = 15 * 60     # after a pass that got nowhere
+_slicer_cooldown = [0.0]      # not before this time
 
 
 def _slicer_pending(limit: int = 25) -> list[dict]:
@@ -1738,13 +1753,83 @@ def _slice_stamp(row: dict) -> int:
         return 1
 
 
+def _slicer_pass(gap: float = None) -> dict:
+    """One go at the prints that still need reading. Never raises.
+
+    Split out of the worker loop so it can be tested: what matters here is how
+    it treats the printer, and "how many sessions did that open" is not
+    something you can see by reading a thread.
+    """
+    report = {"ok": 0, "failed": 0, "sessions": 0, "skipped": None}
+    if not SLICER_CFG.get("enabled"):
+        report["skipped"] = "switched off"
+        return report
+    if time.time() < _slicer_cooldown[0]:
+        report["skipped"] = "cooling down"
+        return report
+    rows = _slicer_pending(limit=SLICER_BATCH)
+    if not rows:
+        report["skipped"] = "nothing pending"
+        return report
+
+    # One session for the whole batch. The printer's FTP server keeps a small
+    # pool of them, and a dial per print - across a history of a hundred -
+    # exhausted it: every handshake afterwards timed out, for every client on
+    # the network, until the printer was power-cycled.
+    try:
+        conn = gcode_meta.Conn(dial=lambda: gcode_meta.connect(
+            CFG.get("ip"), CFG.get("access_code"),
+            float(SLICER_CFG.get("timeout_sec", 20) or 20)))
+    except gcode_meta.SlicerError as e:
+        # Cannot even get in. Retrying straight away is how a printer that is
+        # busy, off, or already overloaded gets hammered - stand well back.
+        _slicer_cooldown[0] = time.time() + SLICER_COOLDOWN
+        _slicer_last.update(at=time.time(), ok=0, failed=0, error=str(e)[:200])
+        report["skipped"] = str(e)[:200]
+        print(f"[slicer] {e} - not trying again for "
+              f"{SLICER_COOLDOWN / 60:.0f} min")
+        return report
+
+    gap = SLICER_GAP if gap is None else gap
+    try:
+        for r in rows:
+            if _slicer_apply(r, conn=conn):
+                report["ok"] += 1
+            else:
+                report["failed"] += 1
+                # one unreadable file is usually all of them (no drive, wrong
+                # code, printer off) - do not keep asking to find out
+                if report["failed"] >= 3 and report["ok"] == 0:
+                    break
+            # a beat between prints: this runs while the printer may be
+            # printing, and nothing here is urgent
+            time.sleep(gap)
+    finally:
+        report["sessions"] = conn.opened
+        conn.close()
+
+    if report["failed"] and not report["ok"]:
+        _slicer_cooldown[0] = time.time() + SLICER_COOLDOWN
+    _slicer_last.update(at=time.time(), ok=report["ok"], failed=report["failed"],
+                        sessions=report["sessions"])
+    if report["ok"]:
+        _cost_dirty()
+        print(f"[slicer] read {report['ok']} print(s) from the printer's drive"
+              + (f", {report['failed']} could not be read" if report["failed"] else ""))
+    elif report["failed"]:
+        print(f"[slicer] {report['failed']} print(s) could not be read: "
+              f"{_slicer_last['error']}")
+    return report
+
+
 def slicer_worker():
     """Read the sliced file of each finished print, once.
 
     Not a poll. It waits for a print to end and then does one pass; the only
     repetition is a retry of prints it has not managed to read yet, and that
-    stops as soon as they are read or the file is gone. A printer with no drive
-    in it therefore says so once per print, not once per minute.
+    stops as soon as they are read, the file is gone, or the printer stops
+    answering. A printer with no drive in it says so once per print, not once
+    per minute.
     """
     if SLICER_CFG.get("backfill", True):
         _slicer_kick.set()          # catch up on history at startup, once
@@ -1754,35 +1839,13 @@ def slicer_worker():
         # a finished print's file is on the drive already, but give the printer
         # a moment to settle before opening a connection to it
         time.sleep(5)
-        if not SLICER_CFG.get("enabled"):
-            continue
-        rows = _slicer_pending()
-        if not rows:
-            continue
-        ok = failed = 0
-        for r in rows:
-            if _slicer_apply(r):
-                ok += 1
-            else:
-                failed += 1
-                # one unreadable file is usually all of them (no drive, wrong
-                # code, printer off) - do not hammer the printer to find out
-                if failed >= 3 and ok == 0:
-                    break
-        _slicer_last.update(at=time.time(), ok=ok, failed=failed)
-        # one pass reads at most a batch. If that batch went well and there is
+        report = _slicer_pass()
+        # One pass reads at most a batch. If that batch went well and there is
         # still a backlog, go round again rather than waiting for the next print
-        # to finish - otherwise switching this on with a long history reads 25
-        # prints and then looks broken.
-        if ok and _slicer_pending(limit=1):
+        # to finish - otherwise switching this on with a long history reads one
+        # batch and then looks broken.
+        if report["ok"] and _slicer_pending(limit=1):
             _slicer_kick.set()
-        if ok:
-            _cost_dirty()
-            print(f"[slicer] read {ok} print(s) from the printer's drive"
-                  + (f", {failed} could not be read" if failed else ""))
-        elif failed:
-            print(f"[slicer] {failed} print(s) could not be read: "
-                  f"{_slicer_last['error']}")
 
 
 _cloud_client = None

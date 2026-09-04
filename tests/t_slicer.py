@@ -251,6 +251,78 @@ except gcode_meta.SlicerError:
     pass
 print("a file with no metadata, and a file that is not a 3MF, are both refused")
 
+# --- every session opened is a session closed -------------------------------
+# This one got out. A ranged read replaces the control connection when it cannot
+# be resynchronised after an abort, and the code closed the object it STARTED
+# with - so every replacement leaked a session to the printer. The printer keeps
+# a small pool of them; a backfill across ~145 prints drained it, and from then
+# on every FTPS handshake timed out for every client on the network until the
+# printer was power-cycled. "Only a socket" is not true of an embedded server.
+class CountingFTP(FakeFTP):
+    def __init__(self, blob, ledger, resync_fails=False):
+        super().__init__(blob)
+        self.ledger = ledger
+        self.resync_fails = resync_fails
+        self.closed = False
+        ledger["opened"] += 1
+
+    def voidresp(self):
+        if self.resync_fails:
+            raise OSError("control connection out of step")
+
+    def close(self):
+        if not self.closed:
+            self.closed = True
+            self.ledger["closed"] += 1
+
+
+for resync_fails, label in [(False, "a clean read"), (True, "a read that has to redial")]:
+    ledger = {"opened": 0, "closed": 0}
+    conn = gcode_meta.Conn(dial=lambda: CountingFTP(BLOB, ledger, resync_fails))
+    try:
+        members, _ = gcode_meta.read_members(conn, "job.gcode.3mf", len(BLOB))
+        assert gcode_meta.SETTINGS_MEMBER in members
+    finally:
+        conn.close()
+    assert ledger["opened"] == ledger["closed"], (
+        f"{label}: opened {ledger['opened']} session(s) and closed "
+        f"{ledger['closed']} - the rest are still held on the printer, and it "
+        f"only has a few")
+    if resync_fails:
+        assert ledger["opened"] > 1, "the redial path was not exercised at all"
+    print(f"{label}: {ledger['opened']} session(s) opened, all closed")
+
+# ...and fetch() closes what it opened, including replacements
+ledger = {"opened": 0, "closed": 0}
+_c = gcode_meta.connect
+gcode_meta.connect = lambda *a, **k: CountingFTP(BLOB, ledger, resync_fails=True)
+try:
+    gcode_meta.fetch("1.2.3.4", "code", subtask="job")
+except gcode_meta.SlicerError:
+    pass                    # the fake drive has no listing; the sessions matter
+finally:
+    gcode_meta.connect = _c
+assert ledger["opened"] == ledger["closed"] and ledger["opened"] >= 1, ledger
+print(f"fetch(): {ledger['opened']} opened, {ledger['closed']} closed")
+
+# --- and a caller can read several prints over ONE session ------------------
+ledger = {"opened": 0, "closed": 0}
+shared = gcode_meta.Conn(dial=lambda: CountingFTP(BLOB, ledger))
+try:
+    for _ in range(4):
+        try:
+            gcode_meta.fetch("1.2.3.4", "code", subtask="job", conn=shared)
+        except gcode_meta.SlicerError:
+            pass
+    assert ledger["opened"] == 1, (
+        f"four prints opened {ledger['opened']} sessions - passing a connection "
+        f"in is the whole point of being able to")
+    assert ledger["closed"] == 0, "fetch closed a session it did not open"
+finally:
+    shared.close()
+assert ledger["closed"] == 1, "the shared session was not closed by its owner"
+print("four prints over one shared session, closed once by whoever opened it")
+
 # --- picking the right file --------------------------------------------------
 FILES = [
     {"name": "Fall in Love_Riffel.gcode.3mf", "size": 1, "mtime": 200},
@@ -420,6 +492,76 @@ assert r.status_code in (200, 502), r.status_code
 assert "sl-3" not in app._slicer_tries or app._slicer_tries["sl-3"] < 5, \
     "asking by hand did not reset the give-up count"
 print("an unreadable file is dropped after a couple of goes, and retried on request")
+
+# --- a pass over the backlog is gentle with the printer --------------------
+# The backfill is the dangerous part: switching the reader on with a long
+# history means going at the printer many times in a row. It gets ONE session
+# for the batch, the batch is small, and a printer that will not answer is left
+# alone rather than retried.
+app._slicer_tries.clear()
+app._slicer_cooldown[0] = 0.0
+app.CONFIG.set("slicer.enabled", True)
+for i in range(20):
+    store.upsert_print(job_id=f"pass-{i}", name=f"job{i}",
+                       started_at=time.time() - 600 - i, ended_at=time.time() - i,
+                       final_state="FINISH", total_layers=5)
+    store.update_print_fields(f"pass-{i}", slice_json=None)
+
+dials = []
+_conn_cls, _fetch = gcode_meta.Conn, gcode_meta.fetch
+gcode_meta.fetch = lambda *a, **k: {"layer_h": 0.2, "read_bytes": 10,
+                                    "v": gcode_meta.FORMAT}
+try:
+    class CountingConn(_conn_cls):
+        def __init__(self, dial=None, ftp=None):
+            dials.append(1)
+            super().__init__(ftp=object())
+    gcode_meta.Conn = CountingConn
+    rep = app._slicer_pass(gap=0)
+    assert rep["ok"] == app.SLICER_BATCH, (
+        f"a pass read {rep['ok']} prints; the batch is {app.SLICER_BATCH} and "
+        f"reading the lot in one go is what overloaded the printer")
+    assert len(dials) == 1, (
+        f"{len(dials)} sessions for {rep['ok']} prints - one session per print, "
+        f"a hundred prints deep, is what drained the printer's pool")
+    assert app.SLICER_BATCH <= 10, "the batch is no longer a small one"
+finally:
+    gcode_meta.Conn, gcode_meta.fetch = _conn_cls, _fetch
+print(f"one pass: {rep['ok']} prints over {len(dials)} session, batch capped at "
+      f"{app.SLICER_BATCH}")
+
+# --- a printer that will not answer is left alone --------------------------
+app._slicer_cooldown[0] = 0.0
+
+
+def _no_answer(*a, **k):
+    raise gcode_meta.SlicerError(
+        "cannot reach the printer's file store: handshake timed out")
+
+
+_connect = gcode_meta.connect
+gcode_meta.connect = _no_answer
+try:
+    rep = app._slicer_pass(gap=0)
+    assert rep["ok"] == 0 and "cannot reach" in (rep["skipped"] or ""), rep
+    assert app._slicer_cooldown[0] > time.time() + 60, (
+        "the printer did not answer and the next kick will try again at once - "
+        "that is how a printer that is merely busy gets hammered into staying "
+        "unreachable")
+    # and the next pass does not even dial
+    tried = []
+    gcode_meta.connect = lambda *a, **k: tried.append(1)
+    rep2 = app._slicer_pass(gap=0)
+    assert rep2["skipped"] == "cooling down" and not tried, rep2
+finally:
+    gcode_meta.connect = _connect
+app._slicer_cooldown[0] = 0.0
+print(f"a printer that will not answer gets {app.SLICER_COOLDOWN / 60:.0f} "
+      f"minutes of quiet, and the next pass does not dial at all")
+
+for i in range(20):
+    store.delete_print(f"pass-{i}")
+app.CONFIG.clear("slicer.enabled")
 
 # --- the endpoints -----------------------------------------------------------
 assert c.post("/api/prints/slicer", json={"job_id": "nope"}).status_code == 404
